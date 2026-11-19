@@ -1,5 +1,13 @@
 # Changelog / تاریخچهٔ تغییرات
 
+## 1.0.1 — UI polish / ظاهر جدید
+
+**EN**
+- Refreshed web UI (CSS only, +3.6 KB): teal palette for light/dark, pill-style tabs, status dot (pulses when connected), toggle switch for enable, stat tiles on the Status tab, clearer focus and hover states, softer cards.
+
+**FA**
+- ظاهر جدید رابط وب (فقط CSS، حدود ۳٫۶ کیلوبایت بیشتر): پالت تیل برای حالت روشن و تیره، تب‌های قرصی، نقطهٔ وضعیت (هنگام اتصال پالس می‌زند)، کلید فعال‌سازی، کاشی‌های آمار در تب وضعیت، فوکوس و hover واضح‌تر و کارت‌های نرم‌تر.
+
 ## 1.0.0 — stable / پایدار
 
 First stable release (the 0.1.0-rc* entries below were the pre-releases). / اولین انتشار پایدار (موارد 0.1.0-rc* پایین‌تر پیش‌انتشار بودند).
