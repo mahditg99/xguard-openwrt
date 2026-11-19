@@ -6,7 +6,7 @@
 
 ```
 files/    root-filesystem overlay baked into the image (what runs on the router)
-tools/    build-xray.{sh,ps1}  build-image.sh  build-release.sh  push-xray.ps1  mirror/
+tools/    build-xray.{sh,ps1}  build-image.sh  build-ipk.sh  build-release.sh  push-xray.ps1  mirror/
 tests/    sim-supervisor.sh (sandbox simulation)  xguard.sample (example config)
 docs/     this documentation (English + Persian)
 .github/  workflows: ci (syntax checks), release (builds and publishes a Release on a tag)
@@ -23,7 +23,7 @@ docs/     this documentation (English + Persian)
    git push origin v0.1.0
    ```
 3. The **release** workflow builds the image and `xray.gz` on a GitHub runner and creates the Release with:
-   `xguard-<tag>-openwrt-<ver>-xiaomi_mi-router-4a-gigabit-sysupgrade.bin`, `xray.gz`, `xray.gz.sha256`, `xray.version`, `xguard-<tag>-package-manifest.txt`, `SHA256SUMS`.
+   `xguard-<tag>-openwrt-<ver>-xiaomi_mi-router-4a-gigabit-sysupgrade.bin`, `xguard_<ver>-1_all.ipk`, `xray.gz`, `xray.gz.sha256`, `xray.version`, `xguard-<tag>-package-manifest.txt`, `SHA256SUMS`.
    Tags starting with `v0.` are marked *pre-release*.
 4. Rebuild with other versions without a tag: *Actions → release → Run workflow* (inputs: `tag`, `openwrt`, `xray`).
 

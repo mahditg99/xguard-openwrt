@@ -42,7 +42,8 @@ jobs:
 
       - name: Release notes
         run: |
-          sed -e "s/@TAG@/$TAG/g" -e "s/@OPENWRT@/$OPENWRT_VERSION/g" -e "s/@XRAY@/$XRAY_VERSION/g" \
+          PKGVER="${TAG#v}"; PKGVER="${PKGVER/-rc/~rc}"      # same rule as tools/build-ipk.sh
+          sed -e "s/@TAG@/$TAG/g" -e "s/@VER@/$PKGVER/g" -e "s/@OPENWRT@/$OPENWRT_VERSION/g" -e "s/@XRAY@/$XRAY_VERSION/g" \
               -e "s|OWNER/REPO|$GITHUB_REPOSITORY|g" \
               .github/release-body.md > release/NOTES.md
           { echo; echo '### SHA-256'; echo '```'; cat release/SHA256SUMS; echo '```'; } >> release/NOTES.md
@@ -57,6 +58,7 @@ jobs:
           prerelease: ${{ startsWith(env.TAG, 'v0.') }}
           files: |
             release/xguard-*
+            release/xguard_*
             release/xray.gz
             release/xray.gz.sha256
             release/xray.version

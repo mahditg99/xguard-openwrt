@@ -40,6 +40,8 @@ You need a router that already runs OpenWrt (to use `sysupgrade`) and a PC with 
    Windows: `powershell -File tools\push-xray.ps1 -Router <router>`.
 5. Open `http://<router>/xguard/` → **Nodes**: paste a link → **Network**: mark interfaces `VPN` → switch **Enabled** on.
 
+Already on OpenWrt 24.10 with enough free flash? The release also has an `.ipk` (`opkg install`) — see [INSTALL §10](docs/INSTALL.md).
+
 Details: **[docs/INSTALL.md](docs/INSTALL.md)** · [Configuration](docs/CONFIGURATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Building & releases](docs/BUILD.md)
 
 ## How it works

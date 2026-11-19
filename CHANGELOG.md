@@ -9,6 +9,7 @@
 - Share links (`vless`, `vmess`, `trojan`, `ss`, `socks`) + raw JSON outbounds/chains + SSH tunnel (`ssh -D`).
 - Per-IP/MAC/interface speed limits (nftables policing), DNS through the tunnel only.
 - Persian web UI (`/xguard/`), `xguardctl` CLI, rpcd API.
+- `xguard_<ver>_all.ipk` for installing on an existing OpenWrt (opkg).
 - OpenWrt 24.10.8 image for the Xiaomi Mi Router 4A Gigabit (no LuCI, zram swap, `kmod-nft-tproxy`, openssh-client).
 - Tested: generated configs with `xray run -test`, ruleset with `nft -c`, supervisor sandbox simulation (34 checks), image with `sysupgrade -T`.
 - **Not yet verified on live traffic:** throughput, multi-day RAM behaviour, kill-switch during a real outage, web UI against a live rpcd.
@@ -20,6 +21,7 @@
 - لینک‌های اشتراک (`vless`، `vmess`، `trojan`، `ss`، `socks`) + outbound/زنجیرهٔ JSON خام + SSH tunnel (`ssh -D`).
 - محدودیت سرعت هر IP/MAC/اینترفیس (policing با nftables)، DNS فقط از تونل.
 - صفحهٔ وب فارسی (`/xguard/`)، CLI به نام `xguardctl`، API روی rpcd.
+- بستهٔ `xguard_<ver>_all.ipk` برای نصب روی OpenWrt موجود (opkg).
 - ایمیج OpenWrt 24.10.8 برای Xiaomi Mi Router 4A Gigabit (بدون LuCI، zram swap، `kmod-nft-tproxy`، openssh-client).
 - آزمایش‌شده: کانفیگ‌های تولیدی با `xray run -test`، ruleset با `nft -c`، شبیه‌سازی ناظر در sandbox (۳۴ بررسی)، ایمیج با `sysupgrade -T`.
 - **هنوز روی ترافیک زنده تأیید نشده:** سرعت، رفتار RAM در چند روز، kill-switch در قطعی واقعی، صفحهٔ وب روی rpcd زنده.

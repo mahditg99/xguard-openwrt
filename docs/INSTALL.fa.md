@@ -122,3 +122,20 @@ xguardctl disable                 # kill-switch و تنظیم DNS تا حدود 
 /usr/sbin/xguardd unguard
 ```
 برای برگشت به OpenWrt ساده، یک ایمیج رسمی OpenWrt را با `sysupgrade -n` فلش کنید.
+
+## ۱۰. روش جایگزین: نصب به‌صورت بسته (بدون فلش)
+
+برای روتری که **از قبل OpenWrt 24.10 (با opkg)** دارد و فضای فلش کافی دارد، Release یک فایل `xguard_<version>_all.ipk` (حدود ۳۰ کیلوبایت، مستقل از معماری) هم دارد. به‌جای جایگزین کردن سیستم، xguard را روی سیستم فعلی شما نصب می‌کند.
+
+- وابستگی‌ها از feedهای OpenWrt می‌آیند (`ucode*`، `rpcd`، `rpcd-mod-ucode`، `uhttpd`، `uhttpd-mod-ubus`، `ip-full`، `kmod-nft-tproxy`، `kmod-zram`، `zram-swap`)، پس روتر برای `opkg update` اینترنت و ساعت درست لازم دارد. بسته‌های `kmod-*` باید با کرنل در حال اجرا یکی باشند.
+- **فضای فلش:** وابستگی‌ها حدود ۱ مگابایت (تخمین) لازم دارند و برای نودهای SSH حدود ۱.۸ مگابایت بیشتر. اول `df -h /overlay` را ببینید. روی Xiaomi 4A Gigabit با ایمیج معمولی (حدود ۱ مگابایت خالی) **جا نمی‌شود** — از ایمیج فریمور استفاده کنید.
+- OpenWrt 25.12 به بعد `apk` دارد؛ این `.ipk` برای `opkg` (نسخهٔ 24.10 و قدیمی‌تر) است.
+
+```sh
+ssh root@<router> 'cat > /tmp/xguard.ipk' < xguard_*_all.ipk
+ssh root@<router> 'opkg update && opkg install /tmp/xguard.ipk'
+ssh root@<router> 'opkg install openssh-client openssh-keygen sshpass'     # فقط برای نودهای SSH
+```
+بعد مراحل ۵ تا ۷ بالا را ادامه دهید (xray در RAM، صفحهٔ وب، بررسی). بسته xray-core را همراه ندارد. فایل `/etc/config/xguard` در آپدیت‌ها می‌ماند؛ `opkg remove xguard` kill-switch، تنظیم DNS و قانون مسیریابی را هم برمی‌دارد.
+
+> فرمت بسته با parser خود `opkg` بررسی شده و چیدمان فایل‌ها با ایمیج فریمور یکی است، ولی نصب کامل روی یک روتر زنده هنوز آزمایش نشده است.

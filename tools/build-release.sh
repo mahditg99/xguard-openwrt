@@ -34,6 +34,9 @@ cp "$HERE/out/openwrt-$OWRT-ramips-mt7621-$BOARD-squashfs-sysupgrade.bin" \
    "$OUT/xguard-$TAG-openwrt-$OWRT-$BOARD-sysupgrade.bin"
 cp "$HERE/out/openwrt-$OWRT-ramips-mt7621-$BOARD.manifest" "$OUT/xguard-$TAG-package-manifest.txt"
 
-(cd "$OUT" && sha256sum xguard-* xray.gz xray.gz.sha256 xray.version > SHA256SUMS)
+echo "== ipk package (opkg)"
+bash "$HERE/build-ipk.sh" "$TAG" "$OUT"
+
+(cd "$OUT" && sha256sum xguard-* xguard_* xray.gz xray.gz.sha256 xray.version > SHA256SUMS)
 echo "== release assets:"
 ls -l "$OUT"

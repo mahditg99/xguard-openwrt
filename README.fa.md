@@ -40,6 +40,8 @@ xguard یک جایگزین سبک برای passwall روی روترهای کوچ
    ویندوز: `powershell -File tools\push-xray.ps1 -Router <router>`.
 5. `http://<router>/xguard/` را باز کنید ← **نودها**: لینک را بچسبانید ← **شبکه**: اینترفیس‌ها را `VPN` کنید ← **فعال** را روشن کنید.
 
+اگر OpenWrt 24.10 دارید و فضای فلش کافی است، Release یک فایل `.ipk` هم دارد (`opkg install`) — [INSTALL.fa.md بخش ۱۰](docs/INSTALL.fa.md).
+
 جزئیات: **[docs/INSTALL.fa.md](docs/INSTALL.fa.md)** · [پیکربندی](docs/CONFIGURATION.fa.md) · [عیب‌یابی](docs/TROUBLESHOOTING.fa.md) · [ساخت و Release](docs/BUILD.fa.md)
 
 ## چگونه کار می‌کند

@@ -6,7 +6,7 @@
 
 ```
 files/    overlay سیستم‌فایل که داخل ایمیج می‌رود (آنچه روی روتر اجرا می‌شود)
-tools/    build-xray.{sh,ps1}  build-image.sh  build-release.sh  push-xray.ps1  mirror/
+tools/    build-xray.{sh,ps1}  build-image.sh  build-ipk.sh  build-release.sh  push-xray.ps1  mirror/
 tests/    sim-supervisor.sh (شبیه‌سازی در sandbox)  xguard.sample (نمونهٔ تنظیمات)
 docs/     همین مستندات (انگلیسی + فارسی)
 .github/  workflowها: ci (بررسی نحو)، release (با تگ، Release می‌سازد و منتشر می‌کند)
@@ -23,7 +23,7 @@ docs/     همین مستندات (انگلیسی + فارسی)
    git push origin v0.1.0
    ```
 3. workflow به نام **release** روی runner گیت‌هاب ایمیج و `xray.gz` را می‌سازد و Release را با این فایل‌ها ایجاد می‌کند:
-   `xguard-<tag>-openwrt-<ver>-xiaomi_mi-router-4a-gigabit-sysupgrade.bin`، `xray.gz`، `xray.gz.sha256`، `xray.version`، `xguard-<tag>-package-manifest.txt`، `SHA256SUMS`.
+   `xguard-<tag>-openwrt-<ver>-xiaomi_mi-router-4a-gigabit-sysupgrade.bin`، `xguard_<ver>-1_all.ipk`، `xray.gz`، `xray.gz.sha256`، `xray.version`، `xguard-<tag>-package-manifest.txt`، `SHA256SUMS`.
    تگ‌هایی که با `v0.` شروع شوند *pre-release* علامت می‌خورند.
 4. ساخت با نسخه‌های دیگر بدون تگ: *Actions ← release ← Run workflow* (ورودی‌ها: `tag`، `openwrt`، `xray`).
 

@@ -7,6 +7,7 @@
 | File | What it is / چیست |
 |---|---|
 | `xguard-@TAG@-openwrt-@OPENWRT@-xiaomi_mi-router-4a-gigabit-sysupgrade.bin` | Full OpenWrt firmware with xguard, **flash this** / فریمور کامل، همین را فلش کنید |
+| `xguard_@VER@-1_all.ipk` | Package for an **existing** OpenWrt 24.10 (`opkg install`), no re-flash. Needs enough free flash / تنها برای OpenWrt 24.10 موجود، بدون فلش |
 | `xray.gz` + `xray.gz.sha256` | Xray-core @XRAY@ (official `xray_softfloat`, gzip). Lives in the router's **RAM**, not on flash / فقط در RAM روتر |
 | `xguard-@TAG@-package-manifest.txt` | Exact package list of the image / فهرست بسته‌های ایمیج |
 | `SHA256SUMS` | Checksums / چک‌سام‌ها |
@@ -16,6 +17,8 @@
 2. Flash **without keeping settings**: `scp -O <image>.bin root@<router>:/tmp/fw.bin` then `sysupgrade -n /tmp/fw.bin`.
 3. Put xray in RAM: `cat xray.gz | ssh root@<router> "xguardctl push-xray $(cut -d' ' -f1 xray.gz.sha256)"`
 4. Open `http://<router>/xguard/`, add a node, choose which interfaces use the VPN, enable.
+
+Install as a package instead of flashing / نصب به‌صورت بسته به‌جای فلش:  `opkg install ./xguard_*_all.ipk` (see INSTALL, section 10).
 
 Full guide / راهنمای کامل: [docs/INSTALL.md](https://github.com/OWNER/REPO/blob/@TAG@/docs/INSTALL.md) · [docs/INSTALL.fa.md](https://github.com/OWNER/REPO/blob/@TAG@/docs/INSTALL.fa.md)
 

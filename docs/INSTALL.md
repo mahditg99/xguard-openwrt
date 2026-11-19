@@ -122,3 +122,20 @@ xguardctl disable                 # kill-switch and DNS hook removed within ~5 s
 /usr/sbin/xguardd unguard
 ```
 To go back to plain OpenWrt, flash an official OpenWrt image with `sysupgrade -n`.
+
+## 10. Alternative: install as a package (no re-flash)
+
+For a router that **already runs OpenWrt 24.10 (opkg)** and has enough free flash, the release also contains `xguard_<version>_all.ipk` (≈ 30 KB, architecture independent). It installs xguard on top of your existing system instead of replacing it.
+
+- Dependencies come from the OpenWrt feeds (`ucode*`, `rpcd`, `rpcd-mod-ucode`, `uhttpd`, `uhttpd-mod-ubus`, `ip-full`, `kmod-nft-tproxy`, `kmod-zram`, `zram-swap`), so the router needs a working internet connection and a correct clock for `opkg update`. `kmod-*` packages must match your running kernel.
+- **Flash space:** the dependencies may need roughly 1 MB (estimate), plus ≈ 1.8 MB if you want SSH-tunnel nodes. Check `df -h /overlay` first. On a Xiaomi 4A Gigabit with a stock-sized image (≈ 1 MB free) this will **not** fit — use the firmware image instead.
+- OpenWrt 25.12 and newer use `apk`; this `.ipk` is for `opkg` (24.10 and older).
+
+```sh
+ssh root@<router> 'cat > /tmp/xguard.ipk' < xguard_*_all.ipk
+ssh root@<router> 'opkg update && opkg install /tmp/xguard.ipk'
+ssh root@<router> 'opkg install openssh-client openssh-keygen sshpass'     # only for SSH-tunnel nodes
+```
+Then continue with steps 5–7 above (xray into RAM, web UI, verify). The package does not ship xray-core. Your `/etc/config/xguard` survives upgrades; `opkg remove xguard` also removes the kill-switch, DNS hook and routing rule.
+
+> The package format has been verified with `opkg`'s own parser and the file layout is identical to the firmware image, but a full installation on a live router has not been tested yet.
