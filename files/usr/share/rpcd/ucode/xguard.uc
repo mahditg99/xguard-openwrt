@@ -4,7 +4,7 @@
 // Authentication/ACL is handled by rpcd (root login, see /usr/share/rpcd/acl.d/xguard.json).
 
 import { cursor } from 'uci';
-import { readfile, writefile, lsdir, stat } from 'fs';
+import { readfile, writefile, lsdir, stat, popen } from 'fs';
 import { parse_link } from '/usr/lib/xguard/links.uc';
 import { load_config, classify_bypass } from '/usr/lib/xguard/core.uc';
 
@@ -55,6 +55,16 @@ function status() {
 	for (let n in cfg.nodes)
 		push(nodes, { id: n['.name'], name: n.name || n['.name'], type: n.type || 'link' });
 	let xray = stat(RUN + '/xray');
+	if (xray) {
+		// the state file is stale while the supervisor is idle, so ask the binary itself
+		let p = popen(RUN + '/xray version 2>/dev/null | head -n1');
+		if (p) {
+			let v = trim(p.read('all') || '');
+			p.close();
+			if (v != '')
+				st.xray_version = v;
+		}
+	}
 	return {
 		state: st,
 		running: (st.status != null && st.status != 'disabled'),
@@ -268,6 +278,19 @@ const methods = {
 					address: r.outbound.settings.address, port: r.outbound.settings.port,
 					network: r.outbound.streamSettings ? r.outbound.streamSettings.network : 'tcp',
 					security: r.outbound.streamSettings ? (r.outbound.streamSettings.security || 'none') : 'none' };
+			} catch (e) {
+				return { error: '' + e };
+			}
+		}
+	},
+	// turn a share link into the equivalent raw xray outbound (to edit fragment, fingerprint, mtu, ...)
+	link_to_json: {
+		args: { link: '' },
+		call: function(req) {
+			try {
+				let r = parse_link(req.args.link);
+				delete r.outbound.__warning;
+				return { ok: true, name: r.name, json: sprintf('%.2J', r.outbound) };
 			} catch (e) {
 				return { error: '' + e };
 			}

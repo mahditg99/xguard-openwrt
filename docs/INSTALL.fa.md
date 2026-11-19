@@ -72,6 +72,10 @@ powershell -File tools\push-xray.ps1 -Router <router>
 ```
 روتر xray در حال اجرا را متوقف می‌کند (RAM جای دو نسخه ندارد)، نسخهٔ جدید را باز می‌کند، SHA-256 را بررسی می‌کند و ناظر آن را اجرا می‌کند.
 
+دستی و بدون ابزار کمکی: `gunzip -c xray.gz | ssh root@<router> 'cat > /tmp/xguard/xray && chmod 755 /tmp/xguard/xray'` (اگر xray در حال اجراست اول متوقفش کنید؛ مسیر باید دقیقاً `/tmp/xguard/xray` باشد).
+
+> ⚠️ بستهٔ `xray-core` خود OpenWrt را نصب **نکنید** (حتی با `opkg -d ram`): xguard فقط `/tmp/xguard/xray` را می‌بیند و نسخهٔ feed (۲۵.۱.۳۰ در 24.10) برای کانفیگ‌های تولیدی xguard قدیمی است (`VLESS settings: "vnext" is empty`). از `xray.gz` همان Release استفاده کنید.
+
 ### ب) روتر بعد از هر بوت خودش دانلود کند (پیشنهادی)
 
 یک یا چند **منبع** بدهید (صفحهٔ وب ← *تنظیمات*، یا UCI). به ترتیب امتحان می‌شوند و تا بی‌نهایت با backoff تکرار می‌شوند:

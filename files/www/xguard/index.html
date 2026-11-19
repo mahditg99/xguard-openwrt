@@ -99,7 +99,7 @@ function say(t, bad) {
 }
 
 // ---- state ----------------------------------------------------------------
-let cfg = null, st = null, dev = null, tab = 'status', dirty = false;
+let cfg = null, st = null, dev = null, tab = 'status', dirty = false, editing = -1;
 const TABS = [['status', 'وضعیت'], ['nodes', 'نودها'], ['net', 'شبکه و دستگاه‌ها'], ['limits', 'محدودیت سرعت'], ['settings', 'تنظیمات'], ['logs', 'لاگ']];
 const fmt = n => { n = +n || 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + ' ' + u[i]; };
 const kb = n => fmt((+n || 0) * 1024);
@@ -109,6 +109,7 @@ const STATUS_FA = { running: 'متصل', degraded: 'قطع (kill-switch فعال
 async function load() {
   [cfg, st, dev] = await Promise.all([xg('get_config'), xg('status'), xg('devices')]);
   $('#enabled').checked = cfg.main.enabled === '1';
+  editing = -1;
   paintHead(); render();
 }
 function paintHead() {
@@ -148,6 +149,8 @@ const saveBar = () => h('div', { class: 'row' }, h('button', { class: 'b', oncli
 
 function vStatus(m) {
   const s = st.state || {};
+  if (cfg.main.enabled === '1' && !cfg.ifaces.some(i => i.mode === 'vpn' || i.mode === 'block') && !cfg.devices.some(d => d.mode === 'vpn'))
+    m.append(h('div', { class: 'card', style: 'border-color:var(--bad)' }, h('b', { style: 'color:var(--bad)' }, 'هشدار: هیچ اینترفیسی روی «VPN» نیست'), h('p', { class: 'hint' }, 'برنامه روشن است ولی همهٔ اینترفیس‌ها «دست‌نخورده/مستقیم»اند؛ پس ترافیک هیچ دستگاهی از VPN نمی‌گذرد و با نبودن xray هم قطع نمی‌شود (kill-switch فقط برای اینترفیس‌های VPN و مسدود است). در تب «شبکه» اینترفیس‌های دلخواه را روی VPN بگذارید. فقط DNS روتر از xray می‌گذرد.')));
   const cell = (k, v) => h('div', {}, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
   m.append(h('div', { class: 'card' }, h('div', { class: 'grid' },
     cell('وضعیت', STATUS_FA[s.status] || s.status || '—'),
@@ -170,6 +173,56 @@ function vStatus(m) {
 }
 async function cmd(c) { try { await xg('command', { cmd: c }); say('دستور ارسال شد'); setTimeout(refresh, 2500); } catch (e) { say(e.message, true); } }
 
+function nodeEditor(n) {
+  const card = h('div', { class: 'card' }, h('b', {}, 'ویرایش نود: ' + n.name));
+  if (n.type === 'link') {
+    card.append(h('label', { class: 'f' }, 'لینک اشتراک'),
+      h('textarea', { class: 'ltr', onchange: e => { n.link = e.target.value.trim(); } }, n.link || ''),
+      h('div', { class: 'row' },
+        h('button', { class: 'b sec', onclick: async () => {
+          const r = await xg('link_to_json', { link: n.link || '' });
+          if (r.error) { say(r.error, true); return; }
+          n.type = 'json'; n.json = r.json; n.link = ''; render();
+          say('به JSON تبدیل شد؛ همهٔ تنظیمات قابل ویرایش است (برای اعمال، ذخیره را بزنید)');
+        } }, 'تبدیل به JSON برای تنظیمات پیشرفته'),
+        h('span', { class: 'hint' }, 'fragment، fingerprint، mtu و هر گزینهٔ دیگر xray فقط در حالت JSON قابل ویرایش است. بعد از تبدیل، لینک اصلی نگه داشته نمی‌شود.')));
+  } else if (n.type === 'json') {
+    let pretty = n.json || '';
+    try { pretty = JSON.stringify(JSON.parse(pretty), null, 2); } catch (e) { }
+    n.json = pretty;
+    const ta = h('textarea', { class: 'ltr', style: 'min-height:18rem;font-family:monospace', onchange: e => { n.json = e.target.value; } }, pretty);
+    const arr = () => { const j = JSON.parse(ta.value); return Array.isArray(j) ? j : [j]; };
+    const put = a => { ta.value = JSON.stringify(a.length === 1 ? a[0] : a, null, 2); n.json = ta.value; };
+    const guard = fn => () => { try { fn(); } catch (e) { say('JSON نامعتبر است: ' + e.message, true); } };
+    const isFrag = o => o && o.protocol === 'freedom' && o.settings && o.settings.fragment;
+    const fp = h('select', {}, ['', 'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random', 'randomized'].map(x => h('option', { value: x }, x || '— fingerprint —')));
+    const fr = { packets: h('input', { class: 'ltr', value: 'tlshello', style: 'width:6rem' }), length: h('input', { class: 'ltr', value: '100-200', style: 'width:6rem' }), interval: h('input', { class: 'ltr', value: '10-20', style: 'width:6rem' }) };
+    const cur = (() => { try { return arr().find(isFrag); } catch (e) { return null; } })();
+    if (cur) { const f = cur.settings.fragment; for (const k of Object.keys(fr)) if (f[k]) fr[k].value = f[k]; }
+    card.append(h('label', { class: 'f' }, 'خروجی (outbound) xray به‌صورت JSON — یک آبجکت، یا آرایه برای زنجیره (اولین عضو خروجی اصلی است)'), ta,
+      h('div', { class: 'row' }, fp, h('button', { class: 'b sec', onclick: guard(() => {
+        if (!fp.value) return;
+        const a = arr(), ss = a[0].streamSettings || (a[0].streamSettings = {});
+        const sec = ss.security;
+        if (sec !== 'tls' && sec !== 'reality') throw new Error('این نود TLS/REALITY ندارد');
+        (ss[sec + 'Settings'] || (ss[sec + 'Settings'] = {})).fingerprint = fp.value; put(a);
+      }) }, 'اعمال fingerprint')),
+      h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Fragment:'), fr.packets, fr.length, fr.interval,
+        h('button', { class: 'b sec', onclick: guard(() => {
+          const a = arr().filter(o => !isFrag(o));
+          a.splice(1, 0, { protocol: 'freedom', settings: { fragment: { packets: fr.packets.value, length: fr.length.value, interval: fr.interval.value } } });
+          put(a);
+        }) }, 'افزودن/به‌روزرسانی fragment'),
+        h('button', { class: 'b sec', onclick: guard(() => { put(arr().filter(o => !isFrag(o))); }) }, 'حذف fragment')),
+      h('p', { class: 'hint' }, 'مقدارهای دیگر (مثلاً mtu در kcpSettings یا settings وایرگارد، sockopt، mux، flow، alpn، …) را مستقیم در JSON بالا ویرایش کنید. Fragment به‌صورت یک خروجی freedom بعد از خروجی اصلی اضافه می‌شود؛ xray را با «ذخیره» و سپس بررسی لاگ آزمایش کنید.'));
+  } else if (n.type === 'ssh') {
+    const f = (k, w, ph) => h('input', { class: 'ltr', style: 'width:' + w, placeholder: ph, value: n[k] || '', onchange: e => { n[k] = e.target.value; } });
+    card.append(h('div', { class: 'row' }, f('host', '12rem', 'host'), f('port', '5rem', 'port'), f('user', '8rem', 'user'), f('password', '10rem', 'password')));
+  }
+  card.append(saveBar());
+  return card;
+}
+
 function vNodes(m) {
   const t = h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'اصلی'), h('th', {}, 'نام'), h('th', {}, 'نوع'), h('th', {}, 'فعال'), h('th', {}, ''))));
   const tb = h('tbody'); t.append(tb);
@@ -178,8 +231,10 @@ function vNodes(m) {
     h('td', {}, h('input', { value: n.name, onchange: e => { n.name = e.target.value; } })),
     h('td', { class: 'mono' }, n.type),
     h('td', {}, h('input', { type: 'checkbox', checked: n.enabled, onchange: e => { n.enabled = e.target.checked; } })),
-    h('td', {}, h('button', { class: 'b del', onclick: () => { if (confirm('حذف شود؟')) { cfg.nodes.splice(i, 1); render(); } } }, 'حذف')))));
+    h('td', {}, h('button', { class: 'b sec', onclick: () => { editing = (editing === i) ? -1 : i; render(); } }, 'ویرایش'), ' ', h('button', { class: 'b del', onclick: () => { if (confirm('حذف شود؟')) { cfg.nodes.splice(i, 1); editing = -1; render(); } } }, 'حذف')))));
   m.append(h('div', { class: 'card' }, h('p', { class: 'hint' }, 'نود «اصلی» اول استفاده می‌شود؛ اگر از کار افتاد، برنامه خودکار به نود بعدی می‌رود و تا بی‌نهایت تلاش می‌کند.'), cfg.nodes.length ? t : h('p', { class: 'hint' }, 'هنوز نودی نیست.'), saveBar()));
+
+  if (editing >= 0 && cfg.nodes[editing]) m.append(nodeEditor(cfg.nodes[editing]));
 
   let type = 'link';
   const box = h('div');

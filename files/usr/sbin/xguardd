@@ -312,7 +312,9 @@ next_node() {
 
 backoff_sleep() {
 	log "retry in ${BACKOFF}s"
-	sleep $BACKOFF
+	local i=0
+	# wake up early for operator commands (push-xray / restart / update-xray) instead of sleeping them away
+	while [ $i -lt $BACKOFF ] && [ ! -e $RUN/cmd ] && [ ! -e $RUN/hold ]; do sleep 1; i=$((i+1)); done
 	BACKOFF=$((BACKOFF * 2)); [ $BACKOFF -gt 30 ] && BACKOFF=30
 }
 

@@ -15,3 +15,6 @@ backup/
 # local test leftovers
 tests/*.log
 *.part
+
+# local copy of the xray-core build that the router fetches (also served from the mirror)
+xray/

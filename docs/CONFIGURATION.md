@@ -78,6 +78,10 @@ config iface
 - `block`: nothing may reach the WAN.
 - Interfaces not listed are untouched. Traffic to private ranges (10/8, 172.16/12, 192.168/16, 169.254/16, 224/4, …) and to the router itself is never sent through the VPN.
 
+## Editing a node (fragment, fingerprint, MTU, …)
+
+In the web UI (*Nodes → Edit*) a link node can be converted to **raw JSON** (the exact xray outbound the link stands for) and then edited freely. Helpers: set the TLS/REALITY **fingerprint**, add/remove a **fragment** hop (an extra `freedom` outbound with `settings.fragment`, chained automatically through `dialerProxy`). Anything else (`kcpSettings.mtu`, WireGuard `settings.mtu`, `sockopt`, `mux`, `flow`, `alpn`, …) is edited in the JSON box. A JSON array is a chain: the first element is the exit, later ones are dialer hops. Converting is one-way: the original link is not kept.
+
 ## `config device` — per-device override
 
 ```

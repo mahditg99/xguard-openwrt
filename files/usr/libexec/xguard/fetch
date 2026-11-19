@@ -4,6 +4,8 @@
 # Sources come from `list source` in /etc/config/xguard, tried in order:
 #   https://host/path/xray.gz         the .gz is streamed straight through gunzip (peak RAM = one binary);
 #                                     https://host/path/xray.gz.sha256 holds sha256 of the UNCOMPRESSED binary
+#                                     If /etc/xguard/pin/<host>.crt exists, ONLY that certificate is trusted for <host>
+#                                     (self-signed mirror, see tools/mirror/setup-https-mirror.sh); the host may carry :port.
 #   ssh://user@host[:port]/path/xray.gz   runs `cat /path/xray.gz` (and .sha256) over OpenSSH with
 #                                     /etc/xguard/id_ed25519 (works with a forced-command mirror key)
 # exit 0 = success, 1 = nothing worked this round (caller retries with backoff, forever)
@@ -71,9 +73,11 @@ for src in $(ucode "$LIB/gen.uc" sources); do
 	http://*|https://*)
 		h=${src#*://}; h=${h%%/*}; h=${h%%:*}
 		bootstrap_host "$h" || continue
-		want=$(uclient-fetch -q -T 20 -O - "$src.sha256" 2>/dev/null | awk '{print $1; exit}')
+		CA=
+		[ -f "$ETC/pin/$h.crt" ] && CA="--ca-certificate=$ETC/pin/$h.crt"
+		want=$(uclient-fetch -q -T 20 $CA -O - "$src.sha256" 2>/dev/null | awk '{print $1; exit}')
 		[ -n "$want" ] || { say "no checksum at $src.sha256"; continue; }
-		uclient-fetch -q -T 30 -O - "$src" 2>/dev/null | gunzip -c > "$PART" 2>/dev/null || { say "download failed: $src"; rm -f "$PART"; continue; }
+		uclient-fetch -q -T 30 $CA -O - "$src" 2>/dev/null | gunzip -c > "$PART" 2>/dev/null || { say "download failed: $src"; rm -f "$PART"; continue; }
 		verify "$want" && { say "xray installed from $src"; exit 0; }
 		;;
 	ssh://*)

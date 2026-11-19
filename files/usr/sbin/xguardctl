@@ -6,7 +6,13 @@ LIB=/usr/lib/xguard
 
 case "$1" in
 status)
-	cat $RUN/state 2>/dev/null || echo "status=not-running"
+	if [ -f $RUN/state ]; then
+		# the version comes from the binary itself: the state file is stale while the supervisor is idle
+		grep -v '^xray_version=' $RUN/state
+		[ -x $RUN/xray ] && echo "xray_version=$($RUN/xray version 2>/dev/null | head -n1)"
+	else
+		echo "status=not-running"
+	fi
 	;;
 logs)
 	echo "--- xguardd"; tail -n 40 $RUN/xguardd.log 2>/dev/null
@@ -34,6 +40,10 @@ push-xray)
 	mkdir -p $RUN
 	touch $RUN/hold
 	echo update-xray > $RUN/cmd
+	# the supervisor must consume the command BEFORE the new binary lands, otherwise it deletes it afterwards
+	i=0
+	while [ $i -lt 45 ] && [ -e $RUN/cmd ]; do sleep 1; i=$((i+1)); done
+	rm -f $RUN/cmd
 	i=0
 	while [ $i -lt 30 ] && { [ -e $RUN/xray ] || pgrep -x xray >/dev/null 2>&1; }; do sleep 1; i=$((i+1)); done
 	rm -f $RUN/xray $RUN/xray.new
@@ -45,6 +55,7 @@ push-xray)
 	chmod 755 $RUN/xray.new
 	$RUN/xray.new version >/dev/null 2>&1 || { rm -f $RUN/xray.new $RUN/hold; echo "binary does not run on this device" >&2; exit 1; }
 	mv $RUN/xray.new $RUN/xray
+	$RUN/xray version 2>/dev/null | head -n1 > $RUN/xray.version
 	rm -f $RUN/hold
 	echo "xray installed in RAM: $($RUN/xray version | head -n1)"
 	;;

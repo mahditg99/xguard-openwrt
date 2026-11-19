@@ -72,6 +72,10 @@ powershell -File tools\push-xray.ps1 -Router <router>
 ```
 The router stops any running xray (RAM cannot hold two copies), unpacks the new one, checks the SHA-256 and the supervisor starts it.
 
+By hand, without the helper: `gunzip -c xray.gz | ssh root@<router> 'cat > /tmp/xguard/xray && chmod 755 /tmp/xguard/xray'` (stop xray first if it is running; the path must be exactly `/tmp/xguard/xray`).
+
+> ⚠️ Do **not** install OpenWrt's `xray-core` package (not even with `opkg -d ram`): xguard only looks at `/tmp/xguard/xray`, and the feed's version (25.1.30 on 24.10) is too old for the configs xguard generates (`VLESS settings: "vnext" is empty`). Use the `xray.gz` from the release.
+
 ### b) Let the router download it by itself after every boot (recommended)
 
 Give it one or more **sources** (UI → *Settings*, or UCI). It tries them in order, retrying forever with backoff:
