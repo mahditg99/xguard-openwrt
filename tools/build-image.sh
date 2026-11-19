@@ -37,7 +37,7 @@ chmod 644 files/usr/lib/xguard/*.uc files/usr/share/rpcd/ucode/xguard.uc files/u
 find files -type d -exec chmod 755 {} +
 
 # remove what a VPN router does not need (ppp, pppoe, ipv6 daemons), add what xguard needs
-PKGS="-ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only \
+PKGS="-ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only -dnsmasq dnsmasq-full \
  ucode ucode-mod-fs ucode-mod-uci ucode-mod-ubus \
  rpcd rpcd-mod-ucode uhttpd uhttpd-mod-ubus \
  kmod-nft-tproxy ip-full \

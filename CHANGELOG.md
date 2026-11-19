@@ -3,6 +3,7 @@
 ## 0.1.0-rc6
 
 **EN**
+- `dnsmasq-full` is now a mandatory dependency of the ipk and part of the image (needed for `nftset`).
 - Exempt domains: dnsmasq gets a direct upstream per domain (works with stock dnsmasq) and, with `dnsmasq-full` (nftset), the resolved IPs are added to the nft set `bypass_dyn`, which the kill-switch skips, so the domains work even with xray down.
 - Fix (important): when the node address is a host name, xray resolved it through the router's resolver, which forwards to xray itself, so the tunnel could never come up once xguard was enabled ("node is dead"). xray now resolves the node's name itself via the bootstrap DNS, outside the tunnel.
 - Exempt (bypass) domains are now resolved outside the tunnel by default (the WAN's upstream resolver, else bootstrap DNS). A single dead node no longer restarts xray every 30 s (which also cut the exempt domains): xray keeps running and keeps probing.
@@ -15,6 +16,7 @@
 - Mirror helpers for HTTPS with a pinned self-signed certificate (`tools/mirror/setup-https-mirror.sh`, `/etc/xguard/pin/<host>.crt`).
 
 **FA**
+- `dnsmasq-full` حالا وابستگی اجباری ipk و بخشی از ایمیج است (برای `nftset` لازم است).
 - دامنه‌های استثنا: dnsmasq برای هر دامنه upstream مستقیم می‌گیرد (با dnsmasq معمولی هم کار می‌کند) و با `dnsmasq-full` (nftset) IPهای resolve‌شده در مجموعهٔ nft به نام `bypass_dyn` می‌روند که kill-switch آن را رد می‌کند؛ پس دامنه‌ها حتی با xray خاموش کار می‌کنند.
 - رفع باگ (مهم): وقتی آدرس نود یک نام میزبان بود، xray آن را از resolver روتر می‌پرسید که خودش به xray می‌رفت؛ پس بعد از روشن شدن xguard تونل هرگز بالا نمی‌آمد («node is dead»). حالا xray نام نود را خودش و با DNS بوت‌استرپ، بیرون از تونل resolve می‌کند.
 - دامنه‌های استثنا (bypass) حالا به‌طور پیش‌فرض بیرون از تونل resolve می‌شوند (DNS بالادست WAN، وگرنه DNS بوت‌استرپ). یک نود مرده دیگر هر ۳۰ ثانیه xray را ری‌استارت نمی‌کند (که دامنه‌های استثنا را هم قطع می‌کرد): xray روشن می‌ماند و پروب ادامه دارد.
