@@ -42,15 +42,15 @@ SIZE="$(du -sb "$DATA" | cut -f1)"
 cat > "$CTRL/control" <<EOF
 Package: xguard
 Version: ${VER}-${REL}
-Depends: libc, ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-ubus, rpcd, rpcd-mod-ucode, uhttpd, uhttpd-mod-ubus, ip-full, firewall4, kmod-nft-tproxy, kmod-zram, zram-swap
+Depends: libc, ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-ubus, rpcd, rpcd-mod-ucode, uhttpd, uhttpd-mod-ubus, ip-full, firewall4, uclient-fetch, ca-bundle, kmod-nft-tproxy, kmod-zram, zram-swap, openssh-client, openssh-keygen, sshpass
 Section: net
 Maintainer: xguard contributors
 Architecture: all
 Installed-Size: ${SIZE}
 Description: Whole-router VPN with a fail-closed kill-switch (xray-core running from RAM).
  Web UI at /xguard/, CLI xguardctl. xray-core itself is NOT included: put it into RAM with
- 'xguardctl push-xray' or configure a download source. For SSH-tunnel nodes also install
- openssh-client, openssh-keygen and sshpass.
+ 'xguardctl push-xray' or configure a download source. All other required packages (ucode, rpcd,
+ uhttpd, ip-full, kmod-nft-tproxy, zram-swap, openssh-client, sshpass, ...) are installed as dependencies.
 EOF
 
 echo "/etc/config/xguard" > "$CTRL/conffiles"
