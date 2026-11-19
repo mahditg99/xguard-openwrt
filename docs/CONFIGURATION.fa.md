@@ -94,6 +94,7 @@ config bypass
 	list cidr '203.0.113.0/24'
 	list cidr '8.8.8.8'
 	list cidr 'example.ir'              # دامنه + همهٔ زیردامنه‌ها
+	list cidr '*.ir'                    # همهٔ سایت‌های با پسوند ir
 	list cidr 'full:www.bank.example'   # دقیقاً همین میزبان
 	list cidr 'keyword:shaparak'        # هر میزبانی که این کلمه را دارد
 ```
@@ -102,7 +103,7 @@ config bypass
 | ورودی | کار چه کسی | رفتار |
 |---|---|---|
 | IPv4 یا CIDR (`203.0.113.0/24`) | nftables | هرگز به xray نمی‌رسد و از kill-switch معاف است؛ پس **حتی وقتی xray/تونل قطع است** هم باز می‌ماند. فقط IPv4. |
-| دامنه (`example.ir`، `domain:example.ir`، `full:www.example.ir`، `keyword:bank`) | قانون مسیریابی xray ← `direct` | با نامی که xray از TLS SNI / هدر Host / QUIC تشخیص می‌دهد تطبیق داده می‌شود (sniffing خودکار روشن می‌شود). `example.ir` ساده یعنی دامنه **و زیردامنه‌هایش**. ترافیک هنوز از xray می‌گذرد، پس وقتی xray خاموش است این دامنه‌ها هم **مثل بقیه قطع می‌شوند** (kill-switch برقرار می‌ماند). |
+| دامنه (`example.ir`، `*.ir`، `domain:example.ir`، `full:www.example.ir`، `keyword:bank`) | قانون مسیریابی xray ← `direct` | با نامی که xray از TLS SNI / هدر Host / QUIC تشخیص می‌دهد تطبیق داده می‌شود (sniffing خودکار روشن می‌شود). `example.ir` ساده یعنی دامنه **و زیردامنه‌هایش**؛ `*.ir` (یا `.ir`) یعنی **همهٔ سایت‌های زیر آن پسوند** (یک TLD کامل مثل `*.ir` یا `*.co.uk`). فقط `*.` در ابتدا wildcard است: `a*.ir`، `*` و `ir` ساده رد می‌شوند. ترافیک هنوز از xray می‌گذرد، پس وقتی xray خاموش است این دامنه‌ها هم **مثل بقیه قطع می‌شوند** (kill-switch برقرار می‌ماند). |
 
 - `geosite:` / `geoip:` **پشتیبانی نمی‌شود** (فایل‌های `.dat` همراه نیستند و xray بالا نمی‌آید)، و کلمهٔ ساده‌ای مثل `localhost` هم نه. ورودی نامعتبر را صفحهٔ وب رد می‌کند؛ در کانفیگ دستی نادیده گرفته و در `xguardctl logs` با عنوان `config warning` ثبت می‌شود.
 - قانون دامنه ترافیکی را که نام ندارد نمی‌بیند (IP خالی، SNI رمزشده/ECH)؛ چنین ترافیکی از VPN می‌رود.

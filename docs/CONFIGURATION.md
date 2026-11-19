@@ -94,6 +94,7 @@ config bypass
 	list cidr '203.0.113.0/24'
 	list cidr '8.8.8.8'
 	list cidr 'example.ir'              # domain + all its sub-domains
+	list cidr '*.ir'                    # every site under the .ir suffix
 	list cidr 'full:www.bank.example'   # exactly this host
 	list cidr 'keyword:shaparak'        # any host containing the word
 ```
@@ -102,7 +103,7 @@ Destinations that clients on `vpn` interfaces may reach **directly**, outside th
 | Entry | Handled by | Behaviour |
 |---|---|---|
 | IPv4 or CIDR (`203.0.113.0/24`) | nftables | Never reaches xray and is exempt from the kill-switch, so it stays reachable **even while xray/the tunnel is down**. IPv4 only. |
-| Domain (`example.ir`, `domain:example.ir`, `full:www.example.ir`, `keyword:bank`) | xray routing rule → `direct` | Matched by the TLS SNI / HTTP Host / QUIC name that xray sniffs (sniffing is enabled automatically). A bare `example.ir` means the domain **and its sub-domains**. The traffic still passes through xray, so while xray is down these domains are **cut off like everything else** (the kill-switch holds). |
+| Domain (`example.ir`, `*.ir`, `domain:example.ir`, `full:www.example.ir`, `keyword:bank`) | xray routing rule → `direct` | Matched by the TLS SNI / HTTP Host / QUIC name that xray sniffs (sniffing is enabled automatically). A bare `example.ir` means the domain **and its sub-domains**; `*.ir` (or `.ir`) means **every site under that suffix** (a whole TLD such as `*.ir`, or `*.co.uk`). Only a leading `*.` is a wildcard: `a*.ir`, `*` and a bare `ir` are rejected. The traffic still passes through xray, so while xray is down these domains are **cut off like everything else** (the kill-switch holds). |
 
 - `geosite:` / `geoip:` are **not supported** (the `.dat` files are not shipped and xray would refuse to start), neither is a bare word like `localhost`. Invalid entries are rejected by the web UI; in a hand-edited config they are ignored and written to `xguardctl logs` as `config warning`.
 - A domain rule cannot see traffic that carries no name (plain IP, encrypted SNI/ECH); such traffic simply goes through the VPN.

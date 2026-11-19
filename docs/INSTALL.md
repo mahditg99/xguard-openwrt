@@ -91,7 +91,7 @@ Check: `xguardctl status` shows `xray_version=…` and `status=…`.
 
 ## 6. Configure (web UI)
 
-Open **`http://<router>/xguard/`** and log in as `root`.
+Open **`http://<router>/xguard/`** and log in as `root`. If LuCI is installed, the same page is also available as **Services → xguard VPN** (it reuses your LuCI login).
 
 1. **Nodes** → *Add node*: paste a link (use *Check link*), or choose *Raw xray JSON* / *SSH tunnel*. Mark one node as *main*; others are failover (in list order).
 2. **Network** → set each interface to **VPN**, **Direct** or **Block**. Never touch the WAN interface here. Device names are shown as the kernel knows them (`phy0-ap0` = 2.4 GHz Wi‑Fi AP, `phy1-ap0` = 5 GHz, `lan1`, `lan2`, …).

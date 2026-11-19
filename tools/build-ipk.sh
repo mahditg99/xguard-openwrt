@@ -63,7 +63,10 @@ cat > "$CTRL/postinst" <<'EOF'
 default_postinst "$0" "$@"
 ret=$?
 # rpcd loads its ucode plugins (our API) and ACL files at start
-[ -z "${IPKG_INSTROOT}" ] && /etc/init.d/rpcd restart >/dev/null 2>&1
+[ -z "${IPKG_INSTROOT}" ] && {
+	/etc/init.d/rpcd restart >/dev/null 2>&1
+	rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache    # LuCI rebuilds its menu (Services -> xguard VPN)
+}
 exit $ret
 EOF
 
@@ -78,6 +81,7 @@ if [ -z "${IPKG_INSTROOT}" ] && [ "${PKG_UPGRADE}" != "1" ]; then
 	/usr/sbin/xguardd unguard >/dev/null 2>&1
 	killall xray >/dev/null 2>&1
 fi
+rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache
 exit $ret
 EOF
 chmod 755 "$CTRL/postinst" "$CTRL/prerm"

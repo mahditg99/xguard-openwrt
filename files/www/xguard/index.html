@@ -68,6 +68,11 @@ function h(tag, attrs, ...kids) {
 }
 
 // ---- ubus ----------------------------------------------------------------
+// opened from LuCI (Services -> xguard VPN): "#sid=<LuCI session>" avoids a second login
+try {
+  const hm = /^#sid=([0-9a-f]{32})$/.exec(location.hash);
+  if (hm) { sessionStorage.setItem('xg_sid', hm[1]); history.replaceState(null, '', location.pathname + location.search); }
+} catch (e) {}
 let sid = sessionStorage.getItem('xg_sid') || '00000000000000000000000000000000';
 async function rpc(obj, method, params) {
   const r = await fetch('/ubus', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'call', params: [sid, obj, method, params || {}] }) });
@@ -227,7 +232,7 @@ function vNet(m) {
     } }, 'افزودن'))));
 
   m.append(h('div', { class: 'card' }, h('b', {}, 'مقصدهایی که از VPN رد نمی‌شوند (IP، CIDR یا دامنه؛ هر خط یکی)'),
-    h('p', { class: 'hint' }, 'شبکه‌های خصوصی (192.168/16، 10/8، …) همیشه مستقیم‌اند. IP یا CIDR (مثل 203.0.113.0/24) مستقیماً با nftables مستثنا می‌شود و حتی اگر xray خاموش باشد باز می‌ماند. دامنه (مثل example.ir، همراه همهٔ زیردامنه‌ها؛ یا full:www.example.ir و keyword:bank) با قانون مسیریابی xray مستقیم می‌شود: sniffing خودکار روشن می‌شود و با خاموش بودن xray این دامنه‌ها هم مثل بقیه قطع می‌شوند (kill-switch). geosite: پشتیبانی نمی‌شود.'),
+    h('p', { class: 'hint' }, 'شبکه‌های خصوصی (192.168/16، 10/8، …) همیشه مستقیم‌اند. IP یا CIDR (مثل 203.0.113.0/24) مستقیماً با nftables مستثنا می‌شود و حتی اگر xray خاموش باشد باز می‌ماند. دامنه (مثل example.ir، همراه همهٔ زیردامنه‌ها؛ برای همهٔ سایت‌های یک پسوند بنویسید *.ir؛ یا full:www.example.ir و keyword:bank) با قانون مسیریابی xray مستقیم می‌شود: sniffing خودکار روشن می‌شود و با خاموش بودن xray این دامنه‌ها هم مثل بقیه قطع می‌شوند (kill-switch). geosite: پشتیبانی نمی‌شود.'),
     h('textarea', { onchange: e => { cfg.bypass = e.target.value.split(/\s+/).filter(Boolean); } }, cfg.bypass.join('\n')), saveBar()));
 }
 

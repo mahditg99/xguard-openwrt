@@ -1,5 +1,15 @@
 # Changelog / تاریخچهٔ تغییرات
 
+## 0.1.0-rc5
+
+**EN**
+- Bypass wildcard: `*.ir` / `.ir` = every site under that suffix (also `*.co.uk`, `*.example.ir`).
+- LuCI: new menu entry **Services → xguard VPN** (embeds the xguard UI, reuses the LuCI session, no second login).
+
+**FA**
+- wildcard در bypass: `*.ir` / `.ir` یعنی همهٔ سایت‌های زیر آن پسوند (و `*.co.uk` و `*.example.ir`).
+- LuCI: منوی جدید **Services ← xguard VPN** (رابط xguard را داخل خودش نشان می‌دهد، از نشست LuCI استفاده می‌کند و ورود دوباره نمی‌خواهد).
+
 ## 0.1.0-rc4
 
 **EN**

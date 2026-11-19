@@ -56,16 +56,28 @@ function classify_bypass(entry) {
 		return ok ? { kind: 'ip', value: e } : null;
 	}
 	let pfx = 'domain';
+	let wild = false;
 	let m = match(e, /^(domain|full|keyword):(.+)$/);
 	if (m) {
 		pfx = m[1];
 		e = m[2];
 	}
+	// "*.ir" / ".ir" / "*.example.ir" = that suffix and everything below it (xray: domain:ir)
+	let w = (pfx == 'domain') ? match(e, /^\*?\.(.+)$/) : null;
+	if (w) {
+		wild = true;
+		e = w[1];
+	}
 	e = lc(e);
 	if (length(e) > 253 || !match(e, RE_HOST))
 		return null;
-	if (pfx != 'keyword' && (index(e, '.') < 0 || match(e, /\.[0-9]+$/)))
-		return null;		// a bare word / "1.2.3" is almost always a typo; use keyword: on purpose
+	if (pfx != 'keyword') {
+		if (wild && index(e, '.') < 0) {
+			if (!match(e, /^[a-z][a-z0-9-]*$/))		// a bare top-level domain such as "ir"
+				return null;
+		} else if (index(e, '.') < 0 || match(e, /\.[0-9]+$/))
+			return null;		// a bare word / "1.2.3" is almost always a typo; use keyword: on purpose
+	}
 	return { kind: 'domain', value: pfx + ':' + e };
 }
 
