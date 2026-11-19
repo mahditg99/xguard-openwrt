@@ -287,6 +287,7 @@ start_xray() {
 	if ! gen xray "$CUR" > $RUN/config.json 2>$RUN/gen.err; then
 		MSG="config for node $CUR invalid: $(head -c 160 $RUN/gen.err)"; log "$MSG"; return 1
 	fi
+	[ -s $RUN/gen.err ] && log "config warning: $(head -c 300 $RUN/gen.err | tr '\n' ' ')"
 	start_ssh
 	: > $RUN/xray.log
 	GOMEMLIMIT=${mem}MiB GOGC=50 GODEBUG=madvdontneed=1 GOMAXPROCS=2 \

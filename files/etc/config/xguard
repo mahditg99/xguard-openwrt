@@ -23,8 +23,10 @@ config main 'main'
 	# Go soft memory limit for xray (MiB) and hard RSS limit before a restart (MiB)
 	option mem_limit '28'
 	option rss_kill '46'
-	# enable xray sniffing (needed only for domain routing rules); costs CPU/RAM
+	# enable xray sniffing; switched on automatically when `config bypass` contains a domain
 	option sniffing '0'
+	# optional resolver used outside the tunnel for the bypass domains only (e.g. 178.22.122.100)
+	option dns_bypass ''
 	# plain DNS used directly (not via the tunnel) only to resolve the host names of `source` entries
 	# while xray is not running yet
 	option bootstrap_dns '1.1.1.1 8.8.8.8'
@@ -53,7 +55,8 @@ config main 'main'
 #	option mode 'direct'               # direct | vpn
 
 # config bypass
-#	list cidr '203.0.113.0/24'         # destinations that never go through the VPN
+#	list cidr '203.0.113.0/24'         # IPv4/CIDR: never goes through the VPN (works even if xray is down)
+#	list cidr 'example.ir'             # domain (+sub-domains): routed 'direct' by xray; also full:host / keyword:word
 
 # config limit
 #	option name 'kid'

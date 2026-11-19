@@ -6,7 +6,7 @@
 import { cursor } from 'uci';
 import { readfile, writefile, lsdir, stat } from 'fs';
 import { parse_link } from '/usr/lib/xguard/links.uc';
-import { load_config } from '/usr/lib/xguard/core.uc';
+import { load_config, classify_bypass } from '/usr/lib/xguard/core.uc';
 
 const RUN = '/tmp/xguard';
 
@@ -16,7 +16,7 @@ function cur() {
 }
 const MAIN_KEYS = [
 	'enabled', 'node', 'log_level', 'dns_remote', 'probe_url', 'probe_interval', 'fail_threshold',
-	'mem_limit', 'rss_kill', 'sniffing', 'block_quic'
+	'mem_limit', 'rss_kill', 'sniffing', 'block_quic', 'dns_bypass'
 ];
 const MAIN_LISTS = [ 'source', 'wan_if' ];
 const NODE_TYPES = [ 'link', 'json', 'ssh' ];
@@ -145,8 +145,10 @@ function save_config(req) {
 			if (!match(v.mac || '', /^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/) && !match(v.ip || '', /^[0-9.]+(\/[0-9]+)?$/))
 				die('device needs a valid mac or ip');
 		for (let b in (d.bypass || []))
-			if (!match(b, /^[0-9]{1,3}(\.[0-9]{1,3}){3}(\/[0-9]{1,2})?$/))
-				die('bad bypass entry: ' + b);
+			if (!classify_bypass(b))
+				die('bad bypass entry: ' + b + ' (IPv4/CIDR or a domain such as example.com)');
+		if (d.main && d.main.dns_bypass && !match(trim('' + d.main.dns_bypass), /^[A-Za-z0-9.:\/_-]+$/))
+			die('bad dns_bypass: ' + d.main.dns_bypass);
 
 		let c = cur();
 		if (!c.get('xguard', 'main'))

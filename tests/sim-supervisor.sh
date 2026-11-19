@@ -75,6 +75,7 @@ config main 'main'
 	option enabled '1'
 	option node 'n_a'
 	option fail_threshold '1'
+	option dns_bypass '178.22.122.100'
 	option probe_interval '3'
 	list wan_if 'wan'
 
@@ -89,6 +90,11 @@ config node 'n_b'
 config iface
 	option name 'phy0-ap0'
 	option mode 'vpn'
+
+config bypass
+	list cidr '203.0.113.0/24'
+	list cidr 'example.ir'
+	list cidr 'geosite:ir'
 EOF
 
 ALIVE='{"observatory":{"proxy":{"alive":true,"delay":80,"outbound_tag":"proxy"}},"stats":{"outbound":{"proxy":{"uplink":10,"downlink":20}}}}'
@@ -115,6 +121,11 @@ check "xray started with node n_a"                  [ "$(state node)" = n_a ]
 check "xray process exists"                         xr
 check "config.json generated for n_a"               grep -q 'example.com' $RUN/config.json
 check "GOMEMLIMIT not leaking into file but process runs" kill -0 $DPID
+check "bypass domains become an xray direct rule"    grep -q '"domain:example.ir"' $RUN/config.json
+check "bypass domains turn sniffing on"             grep -q '"routeOnly": true' $RUN/config.json
+check "domain DNS server gets its own tag + direct route" grep -q '"dns-bypass"' $RUN/config.json
+check "domains never reach the nft sets"            sh -c "! grep -q 'example.ir' $SIM/last-nft.rules"
+check "invalid bypass entries are logged, not fatal" grep -q 'config warning: .*geosite:ir' $RUN/xguardd.log
 echo "$ALIVE" > $RUN/fake_vars
 sleep 3
 check "status becomes running when tunnel alive"    [ "$(state status)" = running ]

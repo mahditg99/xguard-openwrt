@@ -137,4 +137,4 @@ ssh root@<router> 'opkg update && opkg install /tmp/xguard.ipk'
 ```
 Then continue with steps 5–7 above (xray into RAM, web UI, verify). The only thing the package does not ship is xray-core itself (33 MB, lives in RAM). Your `/etc/config/xguard` survives upgrades; `opkg remove xguard` also removes the kill-switch, DNS hook and routing rule.
 
-> The package format has been verified with `opkg`'s own parser and the file layout is identical to the firmware image, but a full installation on a live router has not been tested yet.
+> The package format has been verified with `opkg`'s own parser and the file layout is identical to the firmware image, and it has been installed on a live Xiaomi 4A Gigabit running OpenWrt 24.10 (offline, with its dependencies). Traffic through the tunnel has not been verified yet.

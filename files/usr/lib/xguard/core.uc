@@ -38,6 +38,49 @@ function sid(s) {
 	return s['.name'];
 }
 
+// bypass entries are either an IPv4/CIDR (handled by nftables, never reaches xray) or a domain
+// (handled by an xray routing rule -> "direct"). geosite:/geoip: are refused: the .dat files are not shipped.
+const RE_HOST = /^([A-Za-z0-9_-]+\.)*[A-Za-z0-9_-]+$/;
+
+// -> { kind: 'ip'|'domain', value } or null when the entry is not valid
+function classify_bypass(entry) {
+	let e = trim('' + entry);
+	if (match(e, RE_IP)) {
+		let ok = true;
+		for (let o in split(split(e, '/')[0], '.'))
+			if (int(o) > 255)
+				ok = false;
+		let bits = split(e, '/')[1];
+		if (bits != null && int(bits) > 32)
+			ok = false;
+		return ok ? { kind: 'ip', value: e } : null;
+	}
+	let pfx = 'domain';
+	let m = match(e, /^(domain|full|keyword):(.+)$/);
+	if (m) {
+		pfx = m[1];
+		e = m[2];
+	}
+	e = lc(e);
+	if (length(e) > 253 || !match(e, RE_HOST))
+		return null;
+	if (pfx != 'keyword' && (index(e, '.') < 0 || match(e, /\.[0-9]+$/)))
+		return null;		// a bare word / "1.2.3" is almost always a typo; use keyword: on purpose
+	return { kind: 'domain', value: pfx + ':' + e };
+}
+
+function bypass_split(list) {
+	let r = { ips: [], domains: [], bad: [] };
+	for (let b in list) {
+		let c = classify_bypass(b);
+		if (!c)
+			push(r.bad, b);
+		else
+			push(c.kind == 'ip' ? r.ips : r.domains, c.value);
+	}
+	return r;
+}
+
 function load_config() {
 	let dir = getenv('XGUARD_CONFDIR');	// test hook
 	let c = dir ? cursor(dir, dir + '/.save') : cursor();
@@ -108,13 +151,28 @@ function node_chain(node, main) {
 
 function gen_xray(cfg, node) {
 	let m = cfg.main;
-	let sniff = (mget(m, 'sniffing', '0') == '1');
+	let bp = bypass_split(cfg.bypass);
+	for (let b in bp.bad)
+		warn(sprintf('xguard: ignoring invalid bypass entry "%s" (use IPv4/CIDR or a domain like example.com)\n', b));
+	// domain rules can only match when xray sniffs the TLS SNI / HTTP Host / QUIC, so it is switched on for them
+	let sniff = (mget(m, 'sniffing', '0') == '1') || length(bp.domains) > 0;
 	let sn = (protos) => sniff ? { enabled: true, destOverride: protos, routeOnly: true } : { enabled: false };
 	let is_ssh = (mget(node, 'type', 'link') == 'ssh');
+	let dns_bypass = trim(mget(m, 'dns_bypass', ''));
 
 	let rules = [
 		{ type: 'field', inboundTag: [ 'dns-in' ], outboundTag: 'dns-out' }
 	];
+	let dns_servers = [];
+	if (length(bp.domains)) {
+		// bypassed domains must also be resolved outside the tunnel (geo-DNS), if the user gave a resolver for it
+		if (dns_bypass != '') {
+			push(dns_servers, { tag: 'dns-bypass', address: dns_bypass, domains: bp.domains, skipFallback: true });
+			push(rules, { type: 'field', inboundTag: [ 'dns-bypass' ], outboundTag: 'direct' });
+		}
+		push(rules, { type: 'field', domain: bp.domains, outboundTag: 'direct' });
+	}
+	push(dns_servers, mget(m, 'dns_remote', 'tcp://1.1.1.1'));
 	// drop QUIC so browsers fall back to TCP quickly (always for nodes without UDP, i.e. ssh)
 	if (is_ssh || mget(m, 'block_quic', '1') == '1')
 		push(rules, { type: 'field', network: 'udp', port: '443', outboundTag: 'block' });
@@ -129,7 +187,7 @@ function gen_xray(cfg, node) {
 			} },
 			system: { statsOutboundUplink: true, statsOutboundDownlink: true }
 		},
-		dns: { servers: [ mget(m, 'dns_remote', 'tcp://1.1.1.1') ], queryStrategy: 'UseIPv4' },
+		dns: { servers: dns_servers, queryStrategy: 'UseIPv4' },
 		inbounds: [
 			{
 				tag: 'redir', listen: '0.0.0.0', port: mint(m, 'redir_port', 12345),
@@ -228,13 +286,8 @@ function gen_nft(cfg) {
 			push(list[0], dv.ip);
 	}
 
-	let bypass = [ ...DEFAULT_BYPASS ];
-	let user_bypass = [];
-	for (let b in cfg.bypass)
-		if (match(b, RE_IP)) {
-			push(bypass, b);
-			push(user_bypass, b);
-		}
+	let user_bypass = bypass_split(cfg.bypass).ips;		// domains are handled by xray, see gen_xray()
+	let bypass = [ ...DEFAULT_BYPASS, ...user_bypass ];
 
 	let rp = mint(m, 'redir_port', 12345);
 	let tp = mint(m, 'tproxy_port', 12346);
@@ -387,4 +440,4 @@ function parse_vars(txt) {
 	return r;
 }
 
-export { load_config, ordered_nodes, node_by_id, node_chain, gen_xray, gen_nft, gen_lockdown, parse_vars };
+export { classify_bypass, bypass_split, load_config, ordered_nodes, node_by_id, node_chain, gen_xray, gen_nft, gen_lockdown, parse_vars };

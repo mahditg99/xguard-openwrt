@@ -1,5 +1,17 @@
 # Changelog / تاریخچهٔ تغییرات
 
+## 0.1.0-rc4
+
+**EN**
+- `config bypass` now accepts **domains** besides IPv4/CIDR: `example.ir` (with sub-domains), `full:host`, `keyword:word`. Domains become an xray `direct` routing rule (sniffing is switched on automatically); IPs/CIDRs still use nftables. New optional `dns_bypass` resolver for those domains.
+- Invalid bypass entries are rejected by the web UI and logged as `config warning` instead of being silently dropped.
+- Verified with `xray run -test`, a live xray run (split DNS + SNI routing on a test host) and 39 supervisor-simulation checks.
+
+**FA**
+- `config bypass` علاوه بر IPv4/CIDR حالا **دامنه** هم می‌پذیرد: `example.ir` (با زیردامنه‌ها)، `full:host` و `keyword:word`. دامنه‌ها به قانون مسیریابی `direct` در xray تبدیل می‌شوند (sniffing خودکار روشن می‌شود)؛ IP/CIDR همچنان با nftables است. گزینهٔ اختیاری جدید `dns_bypass` برای resolve این دامنه‌ها.
+- ورودی نامعتبر bypass حالا در صفحهٔ وب رد می‌شود و در لاگ با `config warning` ثبت می‌شود؛ دیگر بی‌صدا حذف نمی‌شود.
+- با `xray run -test`، اجرای واقعی xray (DNS جداگانه + مسیریابی SNI روی یک میزبان آزمایشی) و ۳۹ بررسی شبیه‌ساز ناظر تأیید شد.
+
 ## 0.1.0 — first public pre-release / اولین پیش‌انتشار
 
 **EN**

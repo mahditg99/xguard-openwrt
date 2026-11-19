@@ -2,6 +2,7 @@ config main 'main'
 	option enabled '1'
 	option node 'n_reality'
 	option dns_remote 'tcp://1.1.1.1'
+	option dns_bypass '178.22.122.100'
 	list wan_if 'wan'
 	list source 'https://example.invalid/xray.gz'
 
@@ -71,6 +72,12 @@ config device
 config bypass
 	list cidr '203.0.113.0/24'
 	list cidr '8.8.8.8'
+	list cidr 'example.ir'
+	list cidr 'full:www.bank.example'
+	list cidr 'keyword:shaparak'
+	list cidr 'geosite:ir'
+	list cidr '999.1.1.1'
+	list cidr 'localhost'
 
 config limit
 	option name 'kid'

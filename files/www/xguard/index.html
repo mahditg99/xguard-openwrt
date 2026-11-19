@@ -226,7 +226,8 @@ function vNet(m) {
       cfg.devices.push(/:/.test(v) ? { mac: v, mode: 'direct' } : { ip: v, mode: 'direct' }); render();
     } }, 'افزودن'))));
 
-  m.append(h('div', { class: 'card' }, h('b', {}, 'مقصدهایی که هرگز از VPN رد نمی‌شوند (CIDR، هر خط یکی)'), h('p', { class: 'hint' }, 'شبکه‌های خصوصی (192.168/16، 10/8، …) همیشه مستقیم‌اند.'),
+  m.append(h('div', { class: 'card' }, h('b', {}, 'مقصدهایی که از VPN رد نمی‌شوند (IP، CIDR یا دامنه؛ هر خط یکی)'),
+    h('p', { class: 'hint' }, 'شبکه‌های خصوصی (192.168/16، 10/8، …) همیشه مستقیم‌اند. IP یا CIDR (مثل 203.0.113.0/24) مستقیماً با nftables مستثنا می‌شود و حتی اگر xray خاموش باشد باز می‌ماند. دامنه (مثل example.ir، همراه همهٔ زیردامنه‌ها؛ یا full:www.example.ir و keyword:bank) با قانون مسیریابی xray مستقیم می‌شود: sniffing خودکار روشن می‌شود و با خاموش بودن xray این دامنه‌ها هم مثل بقیه قطع می‌شوند (kill-switch). geosite: پشتیبانی نمی‌شود.'),
     h('textarea', { onchange: e => { cfg.bypass = e.target.value.split(/\s+/).filter(Boolean); } }, cfg.bypass.join('\n')), saveBar()));
 }
 
@@ -257,7 +258,7 @@ function vSettings(m) {
     h('textarea', { placeholder: 'https://host/xguard/xray.gz\nssh://user@host:22/srv/xguard/xray.gz', onchange: e => { M.source = e.target.value.split(/\s+/).filter(Boolean); } }, (M.source || []).join('\n')),
     h('p', { class: 'hint' }, 'xray فقط در RAM است و بعد از هر ریبوت از همین منابع دوباره (تا بی‌نهایت تلاش) دریافت می‌شود. کنار فایل، xray.gz.sha256 باید باشد.'),
     h('div', { class: 'grid' },
-      fld('DNS راه دور (از داخل تونل)', 'dns_remote'), fld('آدرس تست سلامت', 'probe_url'),
+      fld('DNS راه دور (از داخل تونل)', 'dns_remote'), fld('DNS مستقیم برای دامنه‌های مستثنا (مثلاً IP، اختیاری)', 'dns_bypass'), fld('آدرس تست سلامت', 'probe_url'),
       fld('فاصلهٔ تست (ثانیه)', 'probe_interval'), fld('تست ناموفق تا تعویض نود', 'fail_threshold'),
       fld('سقف حافظهٔ Go (MiB)', 'mem_limit'), fld('سقف RSS قبل از ری‌استارت (MiB)', 'rss_kill'),
       fld('سطح لاگ xray', 'log_level')),

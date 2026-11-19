@@ -19,13 +19,14 @@ The supervisor (`xguardd`) watches the file (and `/tmp/dhcp.leases`) and re-appl
 | `bootstrap_dns` | `1.1.1.1 8.8.8.8` | Plain DNS servers used **directly** (not through the tunnel) only to resolve the host names of `source` entries while xray is not running yet. Change them if they are blocked on your network. |
 | `wan_if` (list) | `wan` | Interface(s) facing the internet; forwarded traffic from `vpn`/`block` interfaces towards them is dropped. |
 | `dns_remote` | `tcp://1.1.1.1` | DNS server used **through the tunnel** (`tcp://` is required for SSH nodes). |
+| `dns_bypass` | *(empty)* | Optional resolver (e.g. `178.22.122.100`) used **directly, outside the tunnel**, only for the domains in your `bypass` list (geo-DNS: local sites resolve to local IPs). Empty = those domains are resolved through the tunnel like everything else. |
 | `probe_url` | `https://www.gstatic.com/generate_204` | URL xray's observatory fetches through the tunnel to decide "alive". |
 | `probe_interval` | `10` | Seconds between probes. |
 | `fail_threshold` | `3` | Dead probes in a row before switching to the next node (`fail_threshold × probe_interval` seconds). |
 | `mem_limit` | `28` | `GOMEMLIMIT` for xray, MiB (soft limit; Go's GC works harder near it). |
 | `rss_kill` | `46` | If xray's RSS exceeds this (MiB) it is restarted; the kill-switch stays active meanwhile. |
 | `log_level` | `warning` | xray log level (`debug`, `info`, `warning`, `error`, `none`); the log is a tiny rotating file in RAM. |
-| `sniffing` | `0` | xray sniffing (only needed for domain routing rules; costs CPU/RAM). |
+| `sniffing` | `0` | xray sniffing. Switched on **automatically** while your `bypass` list contains a domain; set `1` to force it on. Costs a little CPU/RAM. |
 | `block_quic` | `1` | Drop UDP/443 so browsers fall back to TCP (always on for SSH nodes). |
 | `time_hosts` | `1.1.1.1 neverssl.com` | Hosts queried over plain HTTP (port 80) for the `Date:` header, used to fix the router clock (no RTC; NTP may be blocked). |
 | `redir_port`, `tproxy_port`, `dns_port`, `socks_port`, `ssh_socks_port`, `metrics_port` | `12345`, `12346`, `15353`, `10808`, `10809`, `11111` | Local ports of xray's inbounds / the SSH SOCKS helper / the metrics endpoint. Change only on conflicts. |
@@ -92,8 +93,21 @@ config device
 config bypass
 	list cidr '203.0.113.0/24'
 	list cidr '8.8.8.8'
+	list cidr 'example.ir'              # domain + all its sub-domains
+	list cidr 'full:www.bank.example'   # exactly this host
+	list cidr 'keyword:shaparak'        # any host containing the word
 ```
-Public destinations that clients on `vpn` interfaces may reach **directly**, outside the tunnel (they are neither proxied nor dropped by the kill-switch). Interfaces in `block` mode are not affected. Use sparingly: it deliberately punches a hole in the fail-closed behaviour.
+Destinations that clients on `vpn` interfaces may reach **directly**, outside the tunnel. Interfaces in `block` mode are not affected. Two kinds of entries (the option is called `cidr` for historical reasons):
+
+| Entry | Handled by | Behaviour |
+|---|---|---|
+| IPv4 or CIDR (`203.0.113.0/24`) | nftables | Never reaches xray and is exempt from the kill-switch, so it stays reachable **even while xray/the tunnel is down**. IPv4 only. |
+| Domain (`example.ir`, `domain:example.ir`, `full:www.example.ir`, `keyword:bank`) | xray routing rule → `direct` | Matched by the TLS SNI / HTTP Host / QUIC name that xray sniffs (sniffing is enabled automatically). A bare `example.ir` means the domain **and its sub-domains**. The traffic still passes through xray, so while xray is down these domains are **cut off like everything else** (the kill-switch holds). |
+
+- `geosite:` / `geoip:` are **not supported** (the `.dat` files are not shipped and xray would refuse to start), neither is a bare word like `localhost`. Invalid entries are rejected by the web UI; in a hand-edited config they are ignored and written to `xguardctl logs` as `config warning`.
+- A domain rule cannot see traffic that carries no name (plain IP, encrypted SNI/ECH); such traffic simply goes through the VPN.
+- To also resolve these domains outside the tunnel set `dns_bypass` (see above).
+- Use sparingly: every entry deliberately punches a hole in the VPN (not in the kill-switch).
 
 ## `config limit`
 
