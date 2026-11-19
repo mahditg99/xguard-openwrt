@@ -443,17 +443,24 @@ while :; do
 	age=$(( $(date +%s) - STARTED ))
 
 	if [ "$known" = 1 ] && [ "$ALIVE" = 1 ]; then
-		FAILS=0; BACKOFF=1; STATUS=running; MSG=
+		FAILS=0; BACKOFF=1; STATUS=running; MSG=; DEADLOG=
 	elif [ "$known" = 1 ] || [ $age -gt 90 ]; then
 		FAILS=$((FAILS + 1)); STATUS=degraded
 		MSG="tunnel not passing traffic (kill-switch active), attempt $FAILS"
 		limit=$(( $(opt fail_threshold 3) * $(opt probe_interval 10) / TICK )); [ $limit -lt 2 ] && limit=2
 		if [ $FAILS -ge $limit ]; then
 			nxt=$(next_node "$CUR")
-			if [ "$nxt" != "$CUR" ]; then log "node $CUR is dead, switching to $nxt"; CUR=$nxt; else log "node $CUR is dead, reconnecting"; fi
-			stop_children; STATUS=restarting; setstate
-			backoff_sleep
-			continue
+			if [ "$nxt" = "$CUR" ] && [ "$(gen nodeinfo "$CUR" 2>/dev/null | cut -d'|' -f1)" != ssh ]; then
+				# the only node: restarting xray cannot help (it redials by itself) and would also cut every
+				# domain you exempted from the VPN, so keep it running and keep probing
+				[ -z "$DEADLOG" ] && log "node $CUR is not passing traffic; it is the only node, xray keeps running and keeps probing"
+				DEADLOG=1; FAILS=0
+			else
+				if [ "$nxt" != "$CUR" ]; then log "node $CUR is dead, switching to $nxt"; CUR=$nxt; else log "node $CUR is dead, reconnecting"; fi
+				stop_children; STATUS=restarting; setstate
+				backoff_sleep
+				continue
+			fi
 		fi
 	else
 		STATUS=starting

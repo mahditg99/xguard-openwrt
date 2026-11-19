@@ -3,6 +3,9 @@
 ## 0.1.0-rc6
 
 **EN**
+- Fix (important): when the node address is a host name, xray resolved it through the router's resolver, which forwards to xray itself, so the tunnel could never come up once xguard was enabled ("node is dead"). xray now resolves the node's name itself via the bootstrap DNS, outside the tunnel.
+- Exempt (bypass) domains are now resolved outside the tunnel by default (the WAN's upstream resolver, else bootstrap DNS). A single dead node no longer restarts xray every 30 s (which also cut the exempt domains): xray keeps running and keeps probing.
+- UI: the per-device mode selector was removed (a special device is always the opposite of the default policy).
 - New global policy `default_mode` (`direct` | `vpn`): either everybody is direct and only chosen interfaces/devices use the VPN, or everybody uses the VPN (fail-closed) and only chosen ones are exempt. Also covers devices that are not listed anywhere. Interface mode `direct` now works in `vpn` policy.
 - Web UI: nodes are edited in a sectioned form (connection, transport, security, advanced: fingerprint, fragment, mux, MTU, ALPN, REALITY keys, ...) with drop-downs; raw JSON only for protocols without a form.
 - Fix: drop-down menus always showed their last option as selected. Warning card when no interface is set to VPN.
@@ -11,6 +14,9 @@
 - Mirror helpers for HTTPS with a pinned self-signed certificate (`tools/mirror/setup-https-mirror.sh`, `/etc/xguard/pin/<host>.crt`).
 
 **FA**
+- رفع باگ (مهم): وقتی آدرس نود یک نام میزبان بود، xray آن را از resolver روتر می‌پرسید که خودش به xray می‌رفت؛ پس بعد از روشن شدن xguard تونل هرگز بالا نمی‌آمد («node is dead»). حالا xray نام نود را خودش و با DNS بوت‌استرپ، بیرون از تونل resolve می‌کند.
+- دامنه‌های استثنا (bypass) حالا به‌طور پیش‌فرض بیرون از تونل resolve می‌شوند (DNS بالادست WAN، وگرنه DNS بوت‌استرپ). یک نود مرده دیگر هر ۳۰ ثانیه xray را ری‌استارت نمی‌کند (که دامنه‌های استثنا را هم قطع می‌کرد): xray روشن می‌ماند و پروب ادامه دارد.
+- رابط: انتخاب «حالت» هر دستگاه حذف شد (دستگاه ویژه همیشه برعکس سیاست پیش‌فرض است).
 - سیاست سراسری جدید `default_mode` (`direct` | `vpn`): یا همه مستقیم‌اند و فقط اینترفیس/دستگاه‌های انتخابی VPN می‌شوند، یا همه از VPN می‌گذرند (fail-closed) و فقط انتخابی‌ها مستثنا هستند. دستگاه‌های تعریف‌نشده را هم پوشش می‌دهد. حالت `direct` اینترفیس حالا در سیاست `vpn` کار می‌کند.
 - صفحهٔ وب: نودها در فرم بخش‌بندی‌شده ویرایش می‌شوند (اتصال، انتقال، امنیت، پیشرفته: fingerprint، fragment، mux، MTU، ALPN، کلیدهای REALITY و …) با لیست کشویی؛ JSON خام فقط برای پروتکل‌های بدون فرم.
 - رفع باگ: لیست‌های کشویی همیشه آخرین گزینه را انتخاب‌شده نشان می‌دادند. کارت هشدار وقتی هیچ اینترفیسی روی VPN نیست.

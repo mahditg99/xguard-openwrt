@@ -393,7 +393,7 @@ function vNet(m) {
   m.append(h('div', { class: 'card' },
     h('b', {}, 'سیاست پیش‌فرض برای همهٔ دستگاه‌ها'),
     h('div', { class: 'row', style: 'margin:.6rem 0' },
-      h('select', { onchange: e => { cfg.main.default_mode = e.target.value; render(); } }, [
+      h('select', { onchange: e => { cfg.main.default_mode = e.target.value; cfg.devices.forEach(d => { d.mode = e.target.value === 'vpn' ? 'direct' : 'vpn'; }); render(); } }, [
         ['direct', 'همه مستقیم — فقط آنچه اضافه می‌کنم VPN شود'],
         ['vpn', 'همه VPN — فقط آنچه اضافه می‌کنم مستقیم باشد (استثنا)']
       ].map(([v, t]) => h('option', { value: v, selected: v === pol }, t)))),
@@ -414,9 +414,10 @@ function vNet(m) {
   m.append(h('div', { class: 'card' },
     h('p', { class: 'hint' }, '«VPN»: تمام ترافیک آن اینترفیس از xray می‌گذرد و در صورت قطع‌شدن اتصال، هرگز مستقیم به اینترنت نمی‌رود. «مستقیم»: بدون VPN. «مسدود»: بدون اینترنت. اینترفیس WAN و loopback را عوض نکنید.'), t));
 
-  const dt = h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'MAC یا IP'), h('th', {}, 'حالت'), h('th', {}, ''))));
+  const dt = h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'MAC یا IP'), h('th', {}, ''))));
+  cfg.devices.forEach(d => { d.mode = pol === 'vpn' ? 'direct' : 'vpn'; });
   const db = h('tbody'); dt.append(db);
-  cfg.devices.forEach((d, i) => db.append(h('tr', {}, h('td', { class: 'mono' }, d.mac || d.ip), h('td', {}, h('select', { onchange: e => { d.mode = e.target.value; } }, [['direct', 'مستقیم'], ['vpn', 'VPN']].map(([v, tx]) => h('option', { value: v, selected: v === d.mode }, tx)))), h('td', {}, h('button', { class: 'b del', onclick: () => { cfg.devices.splice(i, 1); render(); } }, 'حذف')))));
+  cfg.devices.forEach((d, i) => db.append(h('tr', {}, h('td', { class: 'mono' }, d.mac || d.ip), h('td', {}, h('button', { class: 'b del', onclick: () => { cfg.devices.splice(i, 1); render(); } }, 'حذف')))));
   const pick = h('select', { class: 'ltr' }, h('option', { value: '' }, '— از لیست DHCP —'), dev.leases.map(l => h('option', { value: l.mac }, `${l.name} ${l.ip} ${l.mac}`)));
   const man = h('input', { class: 'ltr', placeholder: 'aa:bb:cc:… یا 192.168.x.x' });
   m.append(h('div', { class: 'card' }, h('b', {}, 'دستگاه‌های ویژه (استثنا از سیاست پیش‌فرض)'), h('p', { class: 'hint' }, pol === 'vpn' ? 'دستگاهی که اینجا اضافه شود به‌طور پیش‌فرض «مستقیم» (بدون VPN) است.' : 'دستگاهی که اینجا اضافه شود به‌طور پیش‌فرض «VPN» است.'), cfg.devices.length ? dt : null,

@@ -161,6 +161,21 @@ function node_chain(node, main) {
 	return chain;
 }
 
+// plain IPv4 resolver outside the tunnel: the WAN's upstream (resolv.conf.auto), else bootstrap_dns
+function local_dns(m) {
+	for (let f in [ '/tmp/resolv.conf.d/resolv.conf.auto', '/tmp/resolv.conf.auto' ]) {
+		for (let line in split(readfile(f) || '', '\n')) {
+			let r = match(trim(line), /^nameserver[ 	]+([0-9.]+)$/);
+			if (r && match(r[1], RE_IP) && !match(r[1], /^127\./))
+				return r[1];
+		}
+	}
+	for (let ip in split(trim(mget(m, 'bootstrap_dns', '1.1.1.1 8.8.8.8')), /[ ,]+/))
+		if (match(ip, RE_IP))
+			return ip;
+	return '';
+}
+
 function gen_xray(cfg, node) {
 	let m = cfg.main;
 	let bp = bypass_split(cfg.bypass);
@@ -172,12 +187,52 @@ function gen_xray(cfg, node) {
 	let is_ssh = (mget(node, 'type', 'link') == 'ssh');
 	let dns_bypass = trim(mget(m, 'dns_bypass', ''));
 
+	let chain = node_chain(node, m);
+
+	// The node's own host name must be resolved OUTSIDE the tunnel. While xguard is on, the router's resolver
+	// (dnsmasq) forwards to xray, and xray would need the tunnel to look up the very host the tunnel runs on.
+	// So: xray resolves these names itself, through a plain bootstrap DNS server that is routed 'direct'.
+	let boot_hosts = [];
+	let addr_of = (o) => {
+		let st = o.settings || {};
+		let list = [ st.address ];
+		for (let v in (type(st.vnext) == 'array' ? st.vnext : []))
+			push(list, v.address);
+		for (let v in (type(st.servers) == 'array' ? st.servers : []))
+			push(list, v.address);
+		return filter(list, (a) => type(a) == 'string' && a != '' && !match(a, RE_IP) && index(a, ':') < 0);
+	};
+	for (let o in chain) {
+		let names = addr_of(o);
+		if (!length(names))
+			continue;
+		for (let a in names)
+			push(boot_hosts, 'full:' + lc(a));
+		ensure(ensure(o, 'streamSettings'), 'sockopt').domainStrategy = 'UseIPv4';
+	}
+
 	let rules = [
 		{ type: 'field', inboundTag: [ 'dns-in' ], outboundTag: 'dns-out' }
 	];
 	let dns_servers = [];
+	if (length(boot_hosts)) {
+		let boot_ips = filter(split(trim(mget(m, 'bootstrap_dns', '1.1.1.1 8.8.8.8')), /[ ,]+/), (x) => match(x, RE_IP));
+		let tags = [];
+		let k = 0;
+		for (let ip in boot_ips) {
+			let tag = 'dns-boot' + (k++);
+			push(tags, tag);
+			push(dns_servers, { tag: tag, address: ip, domains: boot_hosts, skipFallback: true });
+		}
+		if (length(tags))
+			push(rules, { type: 'field', inboundTag: tags, outboundTag: 'direct' });
+	}
 	if (length(bp.domains)) {
 		// bypassed domains must also be resolved outside the tunnel (geo-DNS), if the user gave a resolver for it
+		// default: the router's own upstream (ISP) resolver, else the bootstrap DNS, so these domains keep
+		// resolving - and working - even while the tunnel is down
+		if (dns_bypass == '')
+			dns_bypass = local_dns(m);
 		if (dns_bypass != '') {
 			push(dns_servers, { tag: 'dns-bypass', address: dns_bypass, domains: bp.domains, skipFallback: true });
 			push(rules, { type: 'field', inboundTag: [ 'dns-bypass' ], outboundTag: 'direct' });
@@ -225,7 +280,7 @@ function gen_xray(cfg, node) {
 			}
 		],
 		outbounds: [
-			...node_chain(node, m),
+			...chain,
 			{ tag: 'direct', protocol: 'freedom' },
 			{ tag: 'block', protocol: 'blackhole' },
 			{ tag: 'dns-out', protocol: 'dns' }
