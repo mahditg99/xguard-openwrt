@@ -16,7 +16,7 @@ function cur() {
 }
 const MAIN_KEYS = [
 	'enabled', 'node', 'log_level', 'dns_remote', 'probe_url', 'probe_interval', 'fail_threshold',
-	'mem_limit', 'rss_kill', 'sniffing', 'block_quic', 'dns_bypass'
+	'mem_limit', 'rss_kill', 'sniffing', 'block_quic', 'dns_bypass', 'default_mode'
 ];
 const MAIN_LISTS = [ 'source', 'wan_if' ];
 const NODE_TYPES = [ 'link', 'json', 'ssh' ];
@@ -157,6 +157,8 @@ function save_config(req) {
 		for (let b in (d.bypass || []))
 			if (!classify_bypass(b))
 				die('bad bypass entry: ' + b + ' (IPv4/CIDR or a domain such as example.com)');
+		if (d.main && d.main.default_mode && !(d.main.default_mode in [ 'vpn', 'direct' ]))
+			die('default_mode must be vpn or direct');
 		if (d.main && d.main.dns_bypass && !match(trim('' + d.main.dns_bypass), /^[A-Za-z0-9.:\/_-]+$/))
 			die('bad dns_bypass: ' + d.main.dns_bypass);
 

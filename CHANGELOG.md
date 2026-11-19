@@ -3,6 +3,7 @@
 ## 0.1.0-rc6
 
 **EN**
+- New global policy `default_mode` (`direct` | `vpn`): either everybody is direct and only chosen interfaces/devices use the VPN, or everybody uses the VPN (fail-closed) and only chosen ones are exempt. Also covers devices that are not listed anywhere. Interface mode `direct` now works in `vpn` policy.
 - Web UI: nodes are edited in a sectioned form (connection, transport, security, advanced: fingerprint, fragment, mux, MTU, ALPN, REALITY keys, ...) with drop-downs; raw JSON only for protocols without a form.
 - Fix: drop-down menus always showed their last option as selected. Warning card when no interface is set to VPN.
 - Fix: `push-xray` raced with the supervisor's retry sleep, which then deleted the freshly pushed binary. The supervisor now wakes for operator commands.
@@ -10,6 +11,7 @@
 - Mirror helpers for HTTPS with a pinned self-signed certificate (`tools/mirror/setup-https-mirror.sh`, `/etc/xguard/pin/<host>.crt`).
 
 **FA**
+- سیاست سراسری جدید `default_mode` (`direct` | `vpn`): یا همه مستقیم‌اند و فقط اینترفیس/دستگاه‌های انتخابی VPN می‌شوند، یا همه از VPN می‌گذرند (fail-closed) و فقط انتخابی‌ها مستثنا هستند. دستگاه‌های تعریف‌نشده را هم پوشش می‌دهد. حالت `direct` اینترفیس حالا در سیاست `vpn` کار می‌کند.
 - صفحهٔ وب: نودها در فرم بخش‌بندی‌شده ویرایش می‌شوند (اتصال، انتقال، امنیت، پیشرفته: fingerprint، fragment، mux، MTU، ALPN، کلیدهای REALITY و …) با لیست کشویی؛ JSON خام فقط برای پروتکل‌های بدون فرم.
 - رفع باگ: لیست‌های کشویی همیشه آخرین گزینه را انتخاب‌شده نشان می‌دادند. کارت هشدار وقتی هیچ اینترفیسی روی VPN نیست.
 - رفع باگ: `push-xray` با خواب تلاش دوبارهٔ ناظر ناهم‌زمان می‌شد و ناظر باینری تازه‌فرستاده را پاک می‌کرد. حالا ناظر برای فرمان اپراتور زود بیدار می‌شود.

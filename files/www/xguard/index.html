@@ -135,7 +135,7 @@ async function save(okmsg) {
 $('#enabled').addEventListener('change', async e => {
   cfg.main.enabled = e.target.checked ? '1' : '0';
   if (e.target.checked && !cfg.nodes.length) { say('ابتدا یک نود اضافه کنید', true); e.target.checked = false; cfg.main.enabled = '0'; return; }
-  if (e.target.checked && !cfg.ifaces.some(i => i.mode === 'vpn') && !cfg.devices.some(d => d.mode === 'vpn') && !confirm('هیچ اینترفیس یا دستگاهی روی VPN تنظیم نشده. ادامه می‌دهید؟')) { e.target.checked = false; cfg.main.enabled = '0'; return; }
+  if (e.target.checked && !protects() && !confirm('هیچ اینترفیس یا دستگاهی روی VPN تنظیم نشده. ادامه می‌دهید؟')) { e.target.checked = false; cfg.main.enabled = '0'; return; }
   await save(e.target.checked ? 'فعال شد (kill-switch برقرار است)' : 'غیرفعال شد');
 });
 
@@ -152,7 +152,7 @@ const saveBar = () => h('div', { class: 'row' }, h('button', { class: 'b', oncli
 
 function vStatus(m) {
   const s = st.state || {};
-  if (cfg.main.enabled === '1' && !cfg.ifaces.some(i => i.mode === 'vpn' || i.mode === 'block') && !cfg.devices.some(d => d.mode === 'vpn'))
+  if (cfg.main.enabled === '1' && !protects())
     m.append(h('div', { class: 'card', style: 'border-color:var(--bad)' }, h('b', { style: 'color:var(--bad)' }, 'هشدار: هیچ اینترفیسی روی «VPN» نیست'), h('p', { class: 'hint' }, 'برنامه روشن است ولی همهٔ اینترفیس‌ها «دست‌نخورده/مستقیم»اند؛ پس ترافیک هیچ دستگاهی از VPN نمی‌گذرد و با نبودن xray هم قطع نمی‌شود (kill-switch فقط برای اینترفیس‌های VPN و مسدود است). در تب «شبکه» اینترفیس‌های دلخواه را روی VPN بگذارید. فقط DNS روتر از xray می‌گذرد.')));
   const cell = (k, v) => h('div', {}, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
   m.append(h('div', { class: 'card' }, h('div', { class: 'grid' },
@@ -386,8 +386,21 @@ function vNodes(m) {
   draw();
 }
 
+const protects = () => cfg.main.default_mode === 'vpn' || cfg.ifaces.some(i => i.mode === 'vpn' || i.mode === 'block') || cfg.devices.some(d => d.mode === 'vpn');
+
 function vNet(m) {
-  const modeSel = (cur, onch) => h('select', { onchange: onch }, [['', 'دست‌نخورده'], ['vpn', 'VPN'], ['direct', 'مستقیم'], ['block', 'مسدود']].map(([v, t]) => h('option', { value: v, selected: v === cur }, t)));
+  const pol = cfg.main.default_mode === 'vpn' ? 'vpn' : 'direct';
+  m.append(h('div', { class: 'card' },
+    h('b', {}, 'سیاست پیش‌فرض برای همهٔ دستگاه‌ها'),
+    h('div', { class: 'row', style: 'margin:.6rem 0' },
+      h('select', { onchange: e => { cfg.main.default_mode = e.target.value; render(); } }, [
+        ['direct', 'همه مستقیم — فقط آنچه اضافه می‌کنم VPN شود'],
+        ['vpn', 'همه VPN — فقط آنچه اضافه می‌کنم مستقیم باشد (استثنا)']
+      ].map(([v, t]) => h('option', { value: v, selected: v === pol }, t)))),
+    h('p', { class: 'hint' }, pol === 'vpn'
+      ? 'هر دستگاه یا اینترفیسی که تعریف نشده باشد (حتی دستگاه جدید) از VPN می‌گذرد و با قطع شدن VPN اینترنت ندارد. برای استثنا، آن را در لیست پایین یا اینترفیس‌ها روی «مستقیم» بگذارید. «مسدود» همچنان بدون اینترنت است. دسترسی به خود روتر (صفحهٔ وب، SSH، DNS) در همهٔ حالت‌ها باز است.'
+      : 'هر دستگاه یا اینترفیسی که تعریف نشده باشد مستقیم به اینترنت می‌رود. برای اینکه از VPN بگذرد، آن را در لیست پایین یا اینترفیس‌ها روی «VPN» بگذارید. دسترسی به خود روتر در همهٔ حالت‌ها باز است.')));
+  const modeSel = (cur, onch) => h('select', { onchange: onch }, [['', 'طبق سیاست پیش‌فرض'], ['vpn', 'VPN'], ['direct', 'مستقیم'], ['block', 'مسدود']].map(([v, t]) => h('option', { value: v, selected: v === cur }, t)));
   const t = h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'اینترفیس'), h('th', {}, 'حالت'))));
   const tb = h('tbody'); t.append(tb);
   for (const name of dev.interfaces) {
@@ -406,10 +419,10 @@ function vNet(m) {
   cfg.devices.forEach((d, i) => db.append(h('tr', {}, h('td', { class: 'mono' }, d.mac || d.ip), h('td', {}, h('select', { onchange: e => { d.mode = e.target.value; } }, [['direct', 'مستقیم'], ['vpn', 'VPN']].map(([v, tx]) => h('option', { value: v, selected: v === d.mode }, tx)))), h('td', {}, h('button', { class: 'b del', onclick: () => { cfg.devices.splice(i, 1); render(); } }, 'حذف')))));
   const pick = h('select', { class: 'ltr' }, h('option', { value: '' }, '— از لیست DHCP —'), dev.leases.map(l => h('option', { value: l.mac }, `${l.name} ${l.ip} ${l.mac}`)));
   const man = h('input', { class: 'ltr', placeholder: 'aa:bb:cc:… یا 192.168.x.x' });
-  m.append(h('div', { class: 'card' }, h('b', {}, 'استثنا برای یک دستگاه'), h('p', { class: 'hint' }, 'مثلاً یک دستگاه روی اینترفیس VPN که باید مستقیم باشد، یا برعکس.'), cfg.devices.length ? dt : null,
+  m.append(h('div', { class: 'card' }, h('b', {}, 'دستگاه‌های ویژه (استثنا از سیاست پیش‌فرض)'), h('p', { class: 'hint' }, pol === 'vpn' ? 'دستگاهی که اینجا اضافه شود به‌طور پیش‌فرض «مستقیم» (بدون VPN) است.' : 'دستگاهی که اینجا اضافه شود به‌طور پیش‌فرض «VPN» است.'), cfg.devices.length ? dt : null,
     h('div', { class: 'row' }, pick, man, h('button', { class: 'b sec', onclick: () => {
       const v = (man.value || pick.value).trim(); if (!v) return;
-      cfg.devices.push(/:/.test(v) ? { mac: v, mode: 'direct' } : { ip: v, mode: 'direct' }); render();
+      const dm = pol === 'vpn' ? 'direct' : 'vpn'; cfg.devices.push(/:/.test(v) ? { mac: v, mode: dm } : { ip: v, mode: dm }); render();
     } }, 'افزودن'))));
 
   m.append(h('div', { class: 'card' }, h('b', {}, 'مقصدهایی که از VPN رد نمی‌شوند (IP، CIDR یا دامنه؛ هر خط یکی)'),

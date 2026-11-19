@@ -279,7 +279,10 @@ function gen_nft(cfg) {
 	if (!cfg.main.enabled)
 		return null;
 
-	let vpn_if = [], block_if = [], direct_ip = [], direct_mac = [], vpn_ip = [], vpn_mac = [];
+	let vpn_if = [], block_if = [], direct_if = [], direct_ip = [], direct_mac = [], vpn_ip = [], vpn_mac = [];
+	// global policy: 'direct' = nothing is proxied unless chosen (vpn interfaces / vpn devices);
+	//                'vpn'    = every client (everything not coming from WAN) is proxied unless exempted (direct interfaces / direct devices)
+	let dmode = (mget(m, 'default_mode', 'direct') == 'vpn') ? 'vpn' : 'direct';
 	let wan = filter(arr(m.wan_if), (x) => match(x, RE_IFACE));
 	if (!length(wan))
 		wan = [ 'wan' ];
@@ -289,6 +292,8 @@ function gen_nft(cfg) {
 			push(vpn_if, i.name);
 		else if (i.mode == 'block')
 			push(block_if, i.name);
+		else if (i.mode == 'direct')
+			push(direct_if, i.name);
 	}
 	for (let dv in cfg.devices) {
 		let list = (dv.mode == 'direct') ? [ direct_ip, direct_mac ] : [ vpn_ip, vpn_mac ];
@@ -307,6 +312,7 @@ function gen_nft(cfg) {
 	let o = 'table inet xguard\ndelete table inet xguard\ntable inet xguard {\n';
 	o += set_decl('vpn_ifs', 'ifname', map(vpn_if, (x) => sprintf('"%s"', x)));
 	o += set_decl('block_ifs', 'ifname', map(block_if, (x) => sprintf('"%s"', x)));
+	o += set_decl('direct_ifs', 'ifname', map(direct_if, (x) => sprintf('"%s"', x)));
 	o += set_decl('wan_ifs', 'ifname', map(wan, (x) => sprintf('"%s"', x)));
 	o += set_decl('direct_ips', 'ipv4_addr', direct_ip, 'interval');
 	o += set_decl('direct_macs', 'ether_addr', direct_mac);
@@ -349,10 +355,12 @@ function gen_nft(cfg) {
 	}
 	o += objs;
 
-	let skip = '\t\tip saddr @direct_ips return\n\t\tether saddr @direct_macs return\n';
-	let vpn_match = [
+	let skip = '\t\tiifname @direct_ifs return\n\t\tip saddr @direct_ips return\n\t\tether saddr @direct_macs return\n';
+	let vpn_match = (dmode == 'vpn') ? [ 'iifname != @wan_ifs' ] : [
 		'iifname @vpn_ifs', 'ip saddr @vpn_ips', 'ether saddr @vpn_macs'
 	];
+	// blocked interfaces are never proxied: their traffic must reach the forward-hook drop untouched
+	let noproxy = '\t\tiifname @block_ifs return\n';
 
 	// kill-switch: anything from vpn/block clients that reaches FORWARD towards a wan interface is a leak
 	o += '\tchain guard_fwd {\n\t\ttype filter hook forward priority -10; policy accept;\n' + skip;
@@ -365,14 +373,14 @@ function gen_nft(cfg) {
 
 	// TCP -> xray (redirect)
 	o += '\tchain redir_tcp {\n\t\ttype nat hook prerouting priority -105; policy accept;\n' + skip;
-	o += '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n';
+	o += noproxy + '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n';
 	for (let v in vpn_match)
 		o += sprintf('\t\t%s meta l4proto tcp meta mark set %s redirect to :%d\n', v, MARK, rp);
 	o += '\t}\n';
 
 	// UDP -> xray (tproxy)
 	o += '\tchain tproxy_udp {\n\t\ttype filter hook prerouting priority -150; policy accept;\n' + skip;
-	o += '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n';
+	o += noproxy + '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n';
 	for (let v in vpn_match)
 		o += sprintf('\t\t%s meta nfproto ipv4 meta l4proto udp meta mark set %s tproxy ip to :%d accept\n', v, MARK, tp);
 	o += '\t}\n';
@@ -389,7 +397,8 @@ function gen_lockdown(cfg) {
 	if (!cfg.main.enabled)
 		return null;
 
-	let vpn_if = [], block_if = [], vpn_ip = [], vpn_mac = [], direct_ip = [], direct_mac = [];
+	let vpn_if = [], block_if = [], direct_if = [], vpn_ip = [], vpn_mac = [], direct_ip = [], direct_mac = [];
+	let dmode = (mget(cfg.main, 'default_mode', 'direct') == 'vpn') ? 'vpn' : 'direct';
 	let wan = filter(arr(cfg.main.wan_if), (x) => match(x, RE_IFACE));
 	if (!length(wan))
 		wan = [ 'wan' ];
@@ -398,6 +407,8 @@ function gen_lockdown(cfg) {
 			push(vpn_if, sprintf('"%s"', i.name));
 		else if (i.mode == 'block')
 			push(block_if, sprintf('"%s"', i.name));
+		else if (i.mode == 'direct')
+			push(direct_if, sprintf('"%s"', i.name));
 	}
 	for (let dv in cfg.devices) {
 		let list = (dv.mode == 'direct') ? [ direct_ip, direct_mac ] : [ vpn_ip, vpn_mac ];
@@ -408,6 +419,7 @@ function gen_lockdown(cfg) {
 	}
 
 	let o = 'table inet xguard\ndelete table inet xguard\ntable inet xguard {\n';
+	o += set_decl('direct_ifs', 'ifname', direct_if);
 	o += set_decl('vpn_ifs', 'ifname', vpn_if);
 	o += set_decl('block_ifs', 'ifname', block_if);
 	o += set_decl('wan_ifs', 'ifname', map(wan, (x) => sprintf('"%s"', x)));
@@ -416,9 +428,9 @@ function gen_lockdown(cfg) {
 	o += set_decl('vpn_ips', 'ipv4_addr', vpn_ip, 'interval');
 	o += set_decl('vpn_macs', 'ether_addr', vpn_mac);
 	o += '\tchain guard_fwd {\n\t\ttype filter hook forward priority -10; policy accept;\n';
-	o += '\t\tip saddr @direct_ips return\n\t\tether saddr @direct_macs return\n';
+	o += '\t\tiifname @direct_ifs return\n\t\tip saddr @direct_ips return\n\t\tether saddr @direct_macs return\n';
 	o += '\t\tiifname @block_ifs oifname @wan_ifs counter drop\n';
-	o += '\t\tiifname @vpn_ifs oifname @wan_ifs counter drop\n';
+	o += (dmode == 'vpn') ? '\t\tiifname != @wan_ifs oifname @wan_ifs counter drop\n' : '\t\tiifname @vpn_ifs oifname @wan_ifs counter drop\n';
 	o += '\t\tip saddr @vpn_ips oifname @wan_ifs counter drop\n';
 	o += '\t\tether saddr @vpn_macs oifname @wan_ifs counter drop\n';
 	o += '\t}\n}\n';

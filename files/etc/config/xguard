@@ -5,6 +5,9 @@
 
 config main 'main'
 	option enabled '0'
+	# global policy for every client:  direct = nobody is proxied unless chosen (vpn interfaces/devices)
+	#                                  vpn    = everybody is proxied unless exempted (direct interfaces/devices)
+	option default_mode 'direct'
 	# preferred node (section name). Failover walks the other enabled nodes in order.
 	option node ''
 	option log_level 'warning'
