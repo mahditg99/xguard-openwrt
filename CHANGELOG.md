@@ -3,13 +3,15 @@
 ## 0.1.0-rc6
 
 **EN**
-- Web UI: nodes can be edited; a link converts to raw JSON with helpers for fingerprint and fragment (any xray option via JSON). Warning card when no interface is set to VPN.
+- Web UI: nodes are edited in a sectioned form (connection, transport, security, advanced: fingerprint, fragment, mux, MTU, ALPN, REALITY keys, ...) with drop-downs; raw JSON only for protocols without a form.
+- Fix: drop-down menus always showed their last option as selected. Warning card when no interface is set to VPN.
 - Fix: `push-xray` raced with the supervisor's retry sleep, which then deleted the freshly pushed binary. The supervisor now wakes for operator commands.
 - Fix: the xray version shown is read from the binary (was stale while idle).
 - Mirror helpers for HTTPS with a pinned self-signed certificate (`tools/mirror/setup-https-mirror.sh`, `/etc/xguard/pin/<host>.crt`).
 
 **FA**
-- صفحهٔ وب: نودها قابل ویرایش‌اند؛ لینک به JSON خام تبدیل می‌شود (با ابزار fingerprint و fragment؛ هر گزینهٔ xray از طریق JSON). کارت هشدار وقتی هیچ اینترفیسی روی VPN نیست.
+- صفحهٔ وب: نودها در فرم بخش‌بندی‌شده ویرایش می‌شوند (اتصال، انتقال، امنیت، پیشرفته: fingerprint، fragment، mux، MTU، ALPN، کلیدهای REALITY و …) با لیست کشویی؛ JSON خام فقط برای پروتکل‌های بدون فرم.
+- رفع باگ: لیست‌های کشویی همیشه آخرین گزینه را انتخاب‌شده نشان می‌دادند. کارت هشدار وقتی هیچ اینترفیسی روی VPN نیست.
 - رفع باگ: `push-xray` با خواب تلاش دوبارهٔ ناظر ناهم‌زمان می‌شد و ناظر باینری تازه‌فرستاده را پاک می‌کرد. حالا ناظر برای فرمان اپراتور زود بیدار می‌شود.
 - رفع باگ: نسخهٔ xray از خود باینری خوانده می‌شود (در حالت بیکار کهنه بود).
 - ابزار mirror برای HTTPS با گواهی self-signed پین‌شده (`tools/mirror/setup-https-mirror.sh`، `/etc/xguard/pin/<host>.crt`).

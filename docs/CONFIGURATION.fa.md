@@ -80,7 +80,7 @@ config iface
 
 ## ویرایش نود (fragment، fingerprint، MTU و …)
 
-در صفحهٔ وب (*نودها ← ویرایش*) نود لینکی را می‌توان به **JSON خام** (همان outbound دقیق xray که لینک نمایندهٔ آن است) تبدیل و آزادانه ویرایش کرد. ابزارهای کمکی: تنظیم **fingerprint** برای TLS/REALITY و افزودن/حذف **fragment** (یک خروجی `freedom` اضافه با `settings.fragment` که خودکار با `dialerProxy` زنجیره می‌شود). هر چیز دیگر (`kcpSettings.mtu`، `settings.mtu` وایرگارد، `sockopt`، `mux`، `flow`، `alpn` و …) مستقیم در کادر JSON ویرایش می‌شود. آرایهٔ JSON یک زنجیره است: عضو اول خروجی نهایی و بقیه hopهای dialer. تبدیل یک‌طرفه است و لینک اصلی نگه داشته نمی‌شود.
+در صفحهٔ وب (*نودها ← ویرایش*) هر نود به‌صورت **فرم** باز می‌شود و هر بخش کادر جدا دارد: *اتصال* (آدرس، پورت، UUID/رمز، flow، encryption)، *انتقال* (TCP، WebSocket، gRPC، HTTPUpgrade، XHTTP، mKCP با path/host/serviceName/mode/header/seed/**MTU**/TTI)، *امنیت* (none، TLS، REALITY با SNI، **fingerprint**، ALPN، public key، short ID، SpiderX، allowInsecure) و *پیشرفته* (**Fragment**، Mux، TCP Fast Open). گزینه‌ها لیست کشویی با مقدارهای معتبرند. ذخیره، نود را به‌صورت outbound معادل xray نگه می‌دارد (لینک اصلی نگه داشته نمی‌شود). پروتکل‌های بدون فرم (مثل WireGuard) به‌صورت JSON خام ویرایش می‌شوند. آرایهٔ JSON یک زنجیره است: عضو اول خروجی نهایی و بقیه hopهای dialer؛ گزینهٔ Fragment خودکار چنین hopی (یک outbound از نوع `freedom`) اضافه می‌کند.
 
 ## `config device` — استثنا برای هر دستگاه
 
