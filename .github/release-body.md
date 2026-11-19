@@ -1,7 +1,6 @@
 ## xguard @TAG@ — Xiaomi Mi Router 4A Gigabit (OpenWrt @OPENWRT@)
 
-> **Pre-release / پیش‌انتشار:** this build passes its automated checks but has not yet been verified on every device.
-> Read the install guide and keep your own backup. / این نسخه آزمایش‌های خودکار را می‌گذراند ولی هنوز روی همهٔ دستگاه‌ها تأیید نشده؛ راهنمای نصب را بخوانید و پشتیبان بگیرید.
+> **Stable / پایدار:** verified on a real Xiaomi Mi Router 4A Gigabit (OpenWrt 24.10) installed via the `.ipk`, plus automated checks. The `sysupgrade` image has passed `sysupgrade -T` but has not been flashed on hardware yet. RAM is tight on this router. Keep a backup. / روی یک Xiaomi 4A Gigabit واقعی با `.ipk` تأیید شده، به‌علاوهٔ آزمون‌های خودکار. ایمیج `sysupgrade` فقط `sysupgrade -T` را گذرانده و هنوز روی سخت‌افزار فلش نشده. RAM این روتر کم است. پشتیبان بگیرید.
 
 ### Download / دانلود
 | File | What it is / چیست |

@@ -8,7 +8,7 @@ xguard is a lightweight alternative to passwall for small routers. It turns an O
 
 It targets the **Xiaomi Mi Router 4A Gigabit** (MT7621, 128 MB RAM, 16 MB flash, OpenWrt 24.10), where the biggest problem is memory: the latest xray-core binary is **33 MB uncompressed** (the "9 MB" you see in downloads is the compressed size), flash has only ~1 MB free with a stock-sized image, and a full passwall stack eventually filled RAM. xguard is designed around those limits.
 
-> **Status: 0.x pre-release.** Config generation, the kill-switch rule set, the supervisor and the API are covered by automated checks (see [Testing](#testing)). Real-traffic behaviour (throughput, RAM over days, outage handling) is still being verified on hardware — please report results.
+> **Status: 1.0 stable.** Verified on a real Xiaomi Mi Router 4A Gigabit (OpenWrt 24.10, installed as the `.ipk`): VPN per interface/device, the default policy, exempted IPs/domains and the web UI work with live traffic; config generation, the kill-switch rule set, the supervisor and the API are also covered by automated checks (see [Testing](#testing)). The `sysupgrade` image passes `sysupgrade -T` but has not been flashed on hardware yet, and RAM is tight on this router (watch `xguardctl status`) — please report results.
 
 ## Features
 

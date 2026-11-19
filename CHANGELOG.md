@@ -1,6 +1,8 @@
 # Changelog / تاریخچهٔ تغییرات
 
-## 0.1.0-rc6
+## 1.0.0 — stable / پایدار
+
+First stable release (the 0.1.0-rc* entries below were the pre-releases). / اولین انتشار پایدار (موارد 0.1.0-rc* پایین‌تر پیش‌انتشار بودند).
 
 **EN**
 - `dnsmasq-full` is now a mandatory dependency of the ipk and part of the image (needed for `nftset`).
