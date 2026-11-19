@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xguard</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1c2330;--mut:#6b7587;--bd:#dde1e8;--ac:#2563eb;--ok:#15803d;--warn:#b45309;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--bg:#10141b;--card:#181e28;--fg:#e6e9ef;--mut:#93a0b4;--bd:#2a3342;--ac:#6b9bff;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,"Segoe UI",Tahoma,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:.6rem 1rem;align-items:center;padding:.8rem 1rem;background:var(--card);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:5}
+h1{font-size:1.05rem;margin:0}
+.pill{padding:.15rem .7rem;border-radius:99px;font-size:.85rem;border:1px solid var(--bd);color:var(--mut)}
+.pill.running{color:var(--ok);border-color:var(--ok)}.pill.degraded,.pill.starting,.pill.restarting,.pill.fetching-xray,.pill.updating{color:var(--warn);border-color:var(--warn)}
+.pill.disabled{color:var(--mut)}.pill.need-xray,.pill.error,.pill.no-node{color:var(--bad);border-color:var(--bad)}
+nav{display:flex;gap:.25rem;padding:.5rem 1rem 0;overflow-x:auto}
+nav button{background:none;border:0;border-bottom:3px solid transparent;color:var(--mut);padding:.5rem .8rem;font:inherit;cursor:pointer;white-space:nowrap}
+nav button.on{color:var(--ac);border-color:var(--ac)}
+main{max-width:980px;margin:0 auto;padding:1rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:1rem;margin-bottom:1rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem}
+.k{color:var(--mut);font-size:.8rem}.v{font-size:1.1rem;font-weight:600;direction:ltr;text-align:right;word-break:break-all}
+button.b,select,input,textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:.4rem .6rem}
+button.b{cursor:pointer;background:var(--ac);color:#fff;border-color:var(--ac)}button.b.sec{background:none;color:var(--fg);border-color:var(--bd)}button.b.del{background:none;color:var(--bad);border-color:var(--bd)}
+textarea{width:100%;min-height:5.5rem;direction:ltr;font-family:ui-monospace,Consolas,monospace;font-size:.85rem}
+input.ltr,select.ltr,textarea.ltr{direction:ltr;text-align:left}
+table{width:100%;border-collapse:collapse}th,td{padding:.4rem .3rem;border-bottom:1px solid var(--bd);text-align:right;vertical-align:middle}th{color:var(--mut);font-weight:500;font-size:.8rem}
+.row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.4rem 0}
+.hint{color:var(--mut);font-size:.82rem}
+label.f{display:block;margin:.55rem 0 .15rem;color:var(--mut);font-size:.85rem}
+#msg{position:fixed;bottom:1rem;inset-inline:1rem;max-width:560px;margin:auto;padding:.7rem 1rem;border-radius:9px;background:var(--card);border:1px solid var(--bd);display:none;z-index:9}
+#login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:20}
+pre{direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-all;font-size:.78rem;background:var(--bg);padding:.6rem;border-radius:7px;max-height:22rem;overflow:auto}
+.mono{direction:ltr;font-family:ui-monospace,Consolas,monospace;font-size:.85rem}
+</style>
+</head>
+<body>
+<div id="login"><div class="card" style="width:min(92vw,340px)">
+  <h1>xguard</h1><p class="hint">ورود با رمز root روتر</p>
+  <input id="pw" type="password" class="ltr" style="width:100%" placeholder="password (can be empty)" autocomplete="current-password">
+  <div class="row"><button class="b" id="loginbtn">ورود</button><span id="lerr" class="hint" style="color:var(--bad)"></span></div>
+</div></div>
+
+<header>
+  <h1>xguard</h1><span id="pill" class="pill">…</span><span id="hnode" class="hint mono"></span>
+  <span style="flex:1"></span>
+  <label class="row" style="margin:0"><input type="checkbox" id="enabled"> فعال</label>
+</header>
+<nav id="nav"></nav>
+<main id="main"></main>
+<div id="msg"></div>
+
+<script>
+'use strict';
+const $ = (s, e) => (e || document).querySelector(s);
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const k in (attrs || {})) {
+    if (k === 'class') e.className = attrs[k];
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), attrs[k]);
+    else if (k === 'value') e.value = attrs[k];
+    else if (k === 'checked') e.checked = !!attrs[k];
+    else e.setAttribute(k, attrs[k]);
+  }
+  for (const c of kids.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(c));
+  return e;
+}
+
+// ---- ubus ----------------------------------------------------------------
+let sid = sessionStorage.getItem('xg_sid') || '00000000000000000000000000000000';
+async function rpc(obj, method, params) {
+  const r = await fetch('/ubus', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'call', params: [sid, obj, method, params || {}] }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  const [code, data] = j.result;
+  if (code === 6) { showLogin(); throw new Error('access denied'); }
+  if (code !== 0) throw new Error('ubus error ' + code);
+  return data;
+}
+const xg = (m, p) => rpc('xguard', m, p);
+async function login(pw) {
+  const r = await fetch('/ubus', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'call', params: ['00000000000000000000000000000000', 'session', 'login', { username: 'root', password: pw }] }) });
+  const j = await r.json();
+  if (!j.result || j.result[0] !== 0) throw new Error('رمز اشتباه است');
+  sid = j.result[1].ubus_rpc_session; sessionStorage.setItem('xg_sid', sid);
+}
+function showLogin() { $('#login').style.display = 'flex'; }
+
+let mt;
+function say(t, bad) {
+  const m = $('#msg'); m.textContent = t; m.style.display = 'block'; m.style.borderColor = bad ? 'var(--bad)' : 'var(--bd)';
+  clearTimeout(mt); mt = setTimeout(() => m.style.display = 'none', bad ? 7000 : 3000);
+}
+
+// ---- state ----------------------------------------------------------------
+let cfg = null, st = null, dev = null, tab = 'status', dirty = false;
+const TABS = [['status', 'وضعیت'], ['nodes', 'نودها'], ['net', 'شبکه و دستگاه‌ها'], ['limits', 'محدودیت سرعت'], ['settings', 'تنظیمات'], ['logs', 'لاگ']];
+const fmt = n => { n = +n || 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + ' ' + u[i]; };
+const kb = n => fmt((+n || 0) * 1024);
+const dur = s => { s = +s || 0; const d = Math.floor(s / 86400), hh = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (hh ? hh + 'h ' : '') + m + 'm'; };
+const STATUS_FA = { running: 'متصل', degraded: 'قطع (kill-switch فعال)', starting: 'در حال اتصال', restarting: 'ری‌استارت', disabled: 'غیرفعال', 'fetching-xray': 'دانلود xray', 'need-xray': 'xray موجود نیست', 'no-node': 'نود ندارد', updating: 'به‌روزرسانی xray', error: 'خطا' };
+
+async function load() {
+  [cfg, st, dev] = await Promise.all([xg('get_config'), xg('status'), xg('devices')]);
+  $('#enabled').checked = cfg.main.enabled === '1';
+  paintHead(); render();
+}
+function paintHead() {
+  const s = (st.state && st.state.status) || (st.enabled ? 'starting' : 'disabled');
+  const p = $('#pill'); p.className = 'pill ' + s; p.textContent = STATUS_FA[s] || s;
+  const n = st.nodes.find(x => x.id === (st.state && st.state.node));
+  $('#hnode').textContent = n ? n.name : '';
+}
+async function refresh() {
+  try { st = await xg('status'); paintHead(); if (tab === 'status') render(); if (tab === 'logs') loadLogs(); } catch (e) { }
+}
+
+async function save(okmsg) {
+  try {
+    const r = await xg('save_config', { config: cfg });
+    if (r.error) { say(r.error, true); return false; }
+    dirty = false; say(okmsg || 'ذخیره شد'); await load(); return true;
+  } catch (e) { say(e.message, true); return false; }
+}
+$('#enabled').addEventListener('change', async e => {
+  cfg.main.enabled = e.target.checked ? '1' : '0';
+  if (e.target.checked && !cfg.nodes.length) { say('ابتدا یک نود اضافه کنید', true); e.target.checked = false; cfg.main.enabled = '0'; return; }
+  if (e.target.checked && !cfg.ifaces.some(i => i.mode === 'vpn') && !cfg.devices.some(d => d.mode === 'vpn') && !confirm('هیچ اینترفیس یا دستگاهی روی VPN تنظیم نشده. ادامه می‌دهید؟')) { e.target.checked = false; cfg.main.enabled = '0'; return; }
+  await save(e.target.checked ? 'فعال شد (kill-switch برقرار است)' : 'غیرفعال شد');
+});
+
+// ---- tabs ----------------------------------------------------------------
+function drawNav() {
+  const n = $('#nav'); n.innerHTML = '';
+  for (const [id, t] of TABS) n.append(h('button', { class: id === tab ? 'on' : '', onclick: () => { tab = id; drawNav(); render(); } }, t));
+}
+function render() {
+  const m = $('#main'); m.innerHTML = '';
+  ({ status: vStatus, nodes: vNodes, net: vNet, limits: vLimits, settings: vSettings, logs: vLogs })[tab](m);
+}
+const saveBar = () => h('div', { class: 'row' }, h('button', { class: 'b', onclick: () => save() }, 'ذخیره و اعمال'));
+
+function vStatus(m) {
+  const s = st.state || {};
+  const cell = (k, v) => h('div', {}, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
+  m.append(h('div', { class: 'card' }, h('div', { class: 'grid' },
+    cell('وضعیت', STATUS_FA[s.status] || s.status || '—'),
+    cell('تأخیر', s.alive === '1' ? s.delay + ' ms' : '—'),
+    cell('آپلود / دانلود (از شروع xray)', fmt(s.up_bytes) + ' / ' + fmt(s.down_bytes)),
+    cell('مدت اتصال xray', dur(s.uptime)),
+    cell('تعداد ری‌استارت', s.restarts || 0),
+    cell('RAM پروسهٔ xray', kb(s.rss_kb)),
+    cell('RAM در دسترس', kb(st.mem_avail_kb) + ' / ' + kb(st.mem_total_kb)),
+    cell('zram swap آزاد', st.swap_total_kb ? kb(st.swap_free_kb) + ' / ' + kb(st.swap_total_kb) : 'غیرفعال'),
+    cell('نسخهٔ xray', (s.xray_version || '—').replace(/\s*\(.*$/, '')),
+    cell('load', st.loadavg.split(' ').slice(0, 3).join(' '))
+  ), s.msg ? h('p', { class: 'hint', style: 'color:var(--warn)' }, s.msg) : null));
+  m.append(h('div', { class: 'card' },
+    h('div', { class: 'row' },
+      h('button', { class: 'b sec', onclick: () => cmd('restart') }, 'ری‌استارت xray'),
+      h('button', { class: 'b sec', onclick: () => cmd('next') }, 'نود بعدی'),
+      h('button', { class: 'b sec', onclick: () => confirm('xray از منبع تنظیم‌شده دوباره دانلود می‌شود. در این مدت kill-switch فعال می‌ماند.') && cmd('update-xray') }, 'به‌روزرسانی xray')),
+    h('p', { class: 'hint' }, 'اگر اتصال قطع شود، دستگاه‌های روی VPN اینترنت مستقیم نخواهند داشت (kill-switch) و برنامه تا بی‌نهایت دوباره تلاش می‌کند.')));
+}
+async function cmd(c) { try { await xg('command', { cmd: c }); say('دستور ارسال شد'); setTimeout(refresh, 2500); } catch (e) { say(e.message, true); } }
+
+function vNodes(m) {
+  const t = h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'اصلی'), h('th', {}, 'نام'), h('th', {}, 'نوع'), h('th', {}, 'فعال'), h('th', {}, ''))));
+  const tb = h('tbody'); t.append(tb);
+  cfg.nodes.forEach((n, i) => tb.append(h('tr', {},
+    h('td', {}, h('input', { type: 'radio', name: 'pref', checked: cfg.main.node === n.id, onchange: () => { cfg.main.node = n.id; } })),
+    h('td', {}, h('input', { value: n.name, onchange: e => { n.name = e.target.value; } })),
+    h('td', { class: 'mono' }, n.type),
+    h('td', {}, h('input', { type: 'checkbox', checked: n.enabled, onchange: e => { n.enabled = e.target.checked; } })),
+    h('td', {}, h('button', { class: 'b del', onclick: () => { if (confirm('حذف شود؟')) { cfg.nodes.splice(i, 1); render(); } } }, 'حذف')))));
+  m.append(h('div', { class: 'card' }, h('p', { class: 'hint' }, 'نود «اصلی» اول استفاده می‌شود؛ اگر از کار افتاد، برنامه خودکار به نود بعدی می‌رود و تا بی‌نهایت تلاش می‌کند.'), cfg.nodes.length ? t : h('p', { class: 'hint' }, 'هنوز نودی نیست.'), saveBar()));
+
+  let type = 'link';
+  const box = h('div');
+  const draw = () => {
+    box.innerHTML = '';
+    if (type === 'link') box.append(h('label', { class: 'f' }, 'لینک اشتراک (vless:// vmess:// trojan:// ss:// socks://)'), h('textarea', { id: 'nlink', placeholder: 'vless://…' }), h('div', { class: 'row' }, h('button', { class: 'b sec', onclick: testLink }, 'بررسی لینک'), h('span', { id: 'ltest', class: 'hint' })));
+    if (type === 'json') box.append(h('label', { class: 'f' }, 'خروجی (outbound) خام xray به‌صورت JSON — یک آبجکت، یا آرایه برای زنجیره'), h('textarea', { id: 'njson', placeholder: '{"protocol":"wireguard", …}' }));
+    if (type === 'ssh') box.append(
+      h('div', { class: 'row' }, h('input', { id: 'nhost', class: 'ltr', placeholder: 'host' }), h('input', { id: 'nport', class: 'ltr', placeholder: 'port', value: '22', style: 'width:5rem' }), h('input', { id: 'nuser', class: 'ltr', placeholder: 'user', value: 'root', style: 'width:7rem' }), h('input', { id: 'npass', class: 'ltr', type: 'password', placeholder: 'password (یا کلید در /etc/xguard/id_ed25519)' })),
+      h('p', { class: 'hint' }, 'تونل SSH به‌صورت ssh -D اجرا می‌شود (UDP پشتیبانی نمی‌شود؛ DNS روی TCP است).'));
+  };
+  const sel = h('select', { onchange: e => { type = e.target.value; draw(); } }, ['link', 'json', 'ssh'].map(x => h('option', { value: x }, { link: 'لینک اشتراک', json: 'JSON خام xray', ssh: 'SSH tunnel' }[x])));
+  async function testLink() { const r = await xg('test_link', { link: $('#nlink').value }); $('#ltest').textContent = r.error ? r.error : `${r.protocol} ${r.address}:${r.port} ${r.network}/${r.security} «${r.name || ''}»`; }
+  m.append(h('div', { class: 'card' }, h('div', { class: 'row' }, h('b', {}, 'افزودن نود'), sel), box, h('div', { class: 'row' }, h('input', { id: 'nname', placeholder: 'نام (اختیاری)' }),
+    h('button', { class: 'b', onclick: async () => {
+      const n = { type, name: $('#nname').value, enabled: true };
+      if (type === 'link') n.link = $('#nlink').value.trim();
+      if (type === 'json') n.json = $('#njson').value.trim();
+      if (type === 'ssh') { n.host = $('#nhost').value; n.port = $('#nport').value; n.user = $('#nuser').value; n.password = $('#npass').value; }
+      cfg.nodes.push(n); if (!cfg.main.node) cfg.main.node = '';
+      if (!(await save('نود اضافه شد'))) { cfg.nodes.pop(); }
+    } }, 'افزودن'))));
+  draw();
+}
+
+function vNet(m) {
+  const modeSel = (cur, onch) => h('select', { onchange: onch }, [['', 'دست‌نخورده'], ['vpn', 'VPN'], ['direct', 'مستقیم'], ['block', 'مسدود']].map(([v, t]) => h('option', { value: v, selected: v === cur }, t)));
+  const t = h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'اینترفیس'), h('th', {}, 'حالت'))));
+  const tb = h('tbody'); t.append(tb);
+  for (const name of dev.interfaces) {
+    const e = cfg.ifaces.find(i => i.name === name);
+    tb.append(h('tr', {}, h('td', { class: 'mono' }, name), h('td', {}, modeSel(e ? e.mode : '', ev => {
+      const v = ev.target.value; const k = cfg.ifaces.findIndex(i => i.name === name);
+      if (k >= 0) cfg.ifaces.splice(k, 1);
+      if (v) cfg.ifaces.push({ name, mode: v });
+    }))));
+  }
+  m.append(h('div', { class: 'card' },
+    h('p', { class: 'hint' }, '«VPN»: تمام ترافیک آن اینترفیس از xray می‌گذرد و در صورت قطع‌شدن اتصال، هرگز مستقیم به اینترنت نمی‌رود. «مستقیم»: بدون VPN. «مسدود»: بدون اینترنت. اینترفیس WAN و loopback را عوض نکنید.'), t));
+
+  const dt = h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'MAC یا IP'), h('th', {}, 'حالت'), h('th', {}, ''))));
+  const db = h('tbody'); dt.append(db);
+  cfg.devices.forEach((d, i) => db.append(h('tr', {}, h('td', { class: 'mono' }, d.mac || d.ip), h('td', {}, h('select', { onchange: e => { d.mode = e.target.value; } }, [['direct', 'مستقیم'], ['vpn', 'VPN']].map(([v, tx]) => h('option', { value: v, selected: v === d.mode }, tx)))), h('td', {}, h('button', { class: 'b del', onclick: () => { cfg.devices.splice(i, 1); render(); } }, 'حذف')))));
+  const pick = h('select', { class: 'ltr' }, h('option', { value: '' }, '— از لیست DHCP —'), dev.leases.map(l => h('option', { value: l.mac }, `${l.name} ${l.ip} ${l.mac}`)));
+  const man = h('input', { class: 'ltr', placeholder: 'aa:bb:cc:… یا 192.168.x.x' });
+  m.append(h('div', { class: 'card' }, h('b', {}, 'استثنا برای یک دستگاه'), h('p', { class: 'hint' }, 'مثلاً یک دستگاه روی اینترفیس VPN که باید مستقیم باشد، یا برعکس.'), cfg.devices.length ? dt : null,
+    h('div', { class: 'row' }, pick, man, h('button', { class: 'b sec', onclick: () => {
+      const v = (man.value || pick.value).trim(); if (!v) return;
+      cfg.devices.push(/:/.test(v) ? { mac: v, mode: 'direct' } : { ip: v, mode: 'direct' }); render();
+    } }, 'افزودن'))));
+
+  m.append(h('div', { class: 'card' }, h('b', {}, 'مقصدهایی که هرگز از VPN رد نمی‌شوند (CIDR، هر خط یکی)'), h('p', { class: 'hint' }, 'شبکه‌های خصوصی (192.168/16، 10/8، …) همیشه مستقیم‌اند.'),
+    h('textarea', { onchange: e => { cfg.bypass = e.target.value.split(/\s+/).filter(Boolean); } }, cfg.bypass.join('\n')), saveBar()));
+}
+
+function vLimits(m) {
+  const t = h('table', {}, h('thead', {}, h('tr', {}, ['نام', 'هدف', 'مقدار', 'دانلود kbit/s', 'آپلود kbit/s', ''].map(x => h('th', {}, x)))));
+  const tb = h('tbody'); t.append(tb);
+  cfg.limits.forEach((l, i) => {
+    const kind = l.ip ? 'ip' : l.mac ? 'mac' : 'iface';
+    tb.append(h('tr', {},
+      h('td', {}, h('input', { value: l.name, style: 'width:6rem', onchange: e => { l.name = e.target.value; } })),
+      h('td', {}, h('select', { onchange: e => { const v = l.ip || l.mac || l.iface || ''; l.ip = l.mac = l.iface = ''; l[e.target.value] = v; } }, [['ip', 'IP'], ['mac', 'MAC'], ['iface', 'اینترفیس']].map(([v, tx]) => h('option', { value: v, selected: v === kind }, tx)))),
+      h('td', {}, h('input', { class: 'ltr', value: l.ip || l.mac || l.iface || '', style: 'width:10rem', onchange: e => { const k = l.ip !== undefined && l.ip !== '' ? 'ip' : l.mac ? 'mac' : l.iface ? 'iface' : kind; l[k] = e.target.value; } })),
+      h('td', {}, h('input', { class: 'ltr', type: 'number', min: 0, value: l.down, style: 'width:6rem', onchange: e => { l.down = e.target.value; } })),
+      h('td', {}, h('input', { class: 'ltr', type: 'number', min: 0, value: l.up, style: 'width:6rem', onchange: e => { l.up = e.target.value; } })),
+      h('td', {}, h('button', { class: 'b del', onclick: () => { cfg.limits.splice(i, 1); render(); } }, 'حذف'))));
+  });
+  m.append(h('div', { class: 'card' },
+    h('p', { class: 'hint' }, 'محدودیت برای هر دستگاه (IP/MAC) یا یک اینترفیس. ۰ یعنی نامحدود. پیاده‌سازی با nftables به‌صورت policing است: بسته‌های بیش از نرخ دور ریخته می‌شوند و TCP خودش سرعتش را پایین می‌آورد.'),
+    cfg.limits.length ? t : null,
+    h('div', { class: 'row' }, h('button', { class: 'b sec', onclick: () => { cfg.limits.push({ name: 'user' + (cfg.limits.length + 1), ip: '', mac: '', iface: '', down: '2000', up: '1000' }); render(); } }, 'افزودن محدودیت')), saveBar()));
+}
+
+function vSettings(m) {
+  const M = cfg.main;
+  const fld = (label, key, extra) => h('div', {}, h('label', { class: 'f' }, label), h('input', Object.assign({ class: 'ltr', style: 'width:100%', value: M[key] || '', onchange: e => { M[key] = e.target.value; } }, extra || {})));
+  m.append(h('div', { class: 'card' },
+    h('label', { class: 'f' }, 'منبع دانلود xray (هر خط یکی، به ترتیب امتحان می‌شود)'),
+    h('textarea', { placeholder: 'https://host/xguard/xray.gz\nssh://user@host:22/srv/xguard/xray.gz', onchange: e => { M.source = e.target.value.split(/\s+/).filter(Boolean); } }, (M.source || []).join('\n')),
+    h('p', { class: 'hint' }, 'xray فقط در RAM است و بعد از هر ریبوت از همین منابع دوباره (تا بی‌نهایت تلاش) دریافت می‌شود. کنار فایل، xray.gz.sha256 باید باشد.'),
+    h('div', { class: 'grid' },
+      fld('DNS راه دور (از داخل تونل)', 'dns_remote'), fld('آدرس تست سلامت', 'probe_url'),
+      fld('فاصلهٔ تست (ثانیه)', 'probe_interval'), fld('تست ناموفق تا تعویض نود', 'fail_threshold'),
+      fld('سقف حافظهٔ Go (MiB)', 'mem_limit'), fld('سقف RSS قبل از ری‌استارت (MiB)', 'rss_kill'),
+      fld('سطح لاگ xray', 'log_level')),
+    h('div', { class: 'row' }, h('label', {}, h('input', { type: 'checkbox', checked: M.sniffing === '1', onchange: e => { M.sniffing = e.target.checked ? '1' : '0'; } }), ' sniffing (CPU بیشتر)'),
+      h('label', {}, h('input', { type: 'checkbox', checked: M.block_quic !== '0', onchange: e => { M.block_quic = e.target.checked ? '1' : '0'; } }), ' بستن QUIC (UDP/443)')),
+    h('label', { class: 'f' }, 'اینترفیس(های) WAN (ترافیک VPN‌ها به آن‌ها مسدود می‌شود)'),
+    h('input', { class: 'ltr', style: 'width:100%', value: (M.wan_if || []).join(' '), onchange: e => { M.wan_if = e.target.value.split(/\s+/).filter(Boolean); } }), saveBar()));
+}
+
+async function loadLogs() { const l = await xg('logs'); const p = $('#logs'); if (p) p.textContent = `--- xguardd\n${l.xguardd}\n\n--- xray\n${l.xray}\n\n--- ssh\n${l.ssh}`; }
+function vLogs(m) { m.append(h('div', { class: 'card' }, h('div', { class: 'row' }, h('button', { class: 'b sec', onclick: loadLogs }, 'تازه‌سازی')), h('pre', { id: 'logs' }, '…'))); loadLogs(); }
+
+// ---- boot ----------------------------------------------------------------
+$('#loginbtn').addEventListener('click', async () => {
+  try { await login($('#pw').value); $('#login').style.display = 'none'; $('#lerr').textContent = ''; await load(); } catch (e) { $('#lerr').textContent = e.message; }
+});
+$('#pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('#loginbtn').click(); });
+drawNav();
+(async () => { try { await load(); $('#login').style.display = 'none'; } catch (e) { showLogin(); } })();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+# xguard - transparent xray VPN for the whole router, with a fail-closed kill-switch
+#
+# enabled=0 by default: nothing is blocked or proxied until you add a node,
+# choose interfaces and set enabled=1 (or use the web UI at /xguard/).
+
+config main 'main'
+	option enabled '0'
+	# preferred node (section name). Failover walks the other enabled nodes in order.
+	option node ''
+	option log_level 'warning'
+	# remote DNS used (through the tunnel) by dnsmasq. tcp:// is required for SSH nodes.
+	option dns_remote 'tcp://1.1.1.1'
+	option dns_port '15353'
+	option redir_port '12345'
+	option tproxy_port '12346'
+	option socks_port '10808'
+	option ssh_socks_port '10809'
+	option metrics_port '11111'
+	option probe_url 'https://www.gstatic.com/generate_204'
+	option probe_interval '10'
+	# consecutive dead probes before switching to the next node
+	option fail_threshold '3'
+	# Go soft memory limit for xray (MiB) and hard RSS limit before a restart (MiB)
+	option mem_limit '28'
+	option rss_kill '46'
+	# enable xray sniffing (needed only for domain routing rules); costs CPU/RAM
+	option sniffing '0'
+	# plain DNS used directly (not via the tunnel) only to resolve the host names of `source` entries
+	# while xray is not running yet
+	option bootstrap_dns '1.1.1.1 8.8.8.8'
+	# interfaces facing the internet (traffic from vpn interfaces to these is dropped = kill-switch)
+	list wan_if 'wan'
+	# where the router downloads xray from (tried in order, forever):
+	#   https://host/path/xray.gz      (+ xray.gz.sha256 next to it, sha256 of the *uncompressed* binary)
+	#   ssh://user@host[:port]/xray.gz (OpenSSH, key /etc/xguard/id_ed25519)
+	# list source 'https://example.com/xguard/xray.gz'
+
+# config node 'n1'
+#	option name 'My VLESS'
+#	option enabled '1'
+#	option type 'link'                 # link | json | ssh
+#	option link 'vless://uuid@host:443?type=ws&security=tls&sni=host&path=%2Fws#name'
+#	# type json : option json '{"protocol":"vless","settings":{...},"streamSettings":{...}}'
+#	#             (one xray outbound object, or an array = chain, first element is used as the exit)
+#	# type ssh  : option host / port / user / password (or key file) -> ssh -D socks outbound
+
+# config iface
+#	option name 'phy0-ap0'             # network device (see: ls /sys/class/net)
+#	option mode 'vpn'                  # vpn | direct | block
+
+# config device                         # per-device override
+#	option mac 'aa:bb:cc:dd:ee:ff'     # or: option ip '192.168.5.50'
+#	option mode 'direct'               # direct | vpn
+
+# config bypass
+#	list cidr '203.0.113.0/24'         # destinations that never go through the VPN
+
+# config limit
+#	option name 'kid'
+#	option ip '192.168.5.60'           # or: option mac / option iface
+#	option down '4000'                 # kbit/s (0 = unlimited)
+#	option up '1000'

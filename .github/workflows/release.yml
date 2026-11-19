@@ -1,0 +1,63 @@
+name: release
+
+# Push a tag like v0.1.0 -> this builds the OpenWrt image + xray.gz and publishes a GitHub Release.
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (must follow v*, e.g. v0.1.1)'
+        required: true
+      openwrt:
+        description: 'OpenWrt version'
+        required: false
+        default: '24.10.8'
+      xray:
+        description: 'Xray-core version'
+        required: false
+        default: 'v26.11.9'
+
+permissions:
+  contents: write
+
+env:
+  OPENWRT_VERSION: ${{ inputs.openwrt || '24.10.8' }}
+  XRAY_VERSION: ${{ inputs.xray || 'v26.11.9' }}
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ImageBuilder prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make zstd rsync xz-utils file wget gawk perl patch bzip2 python3 unzip curl
+
+      - name: Build image and xray.gz
+        run: bash tools/build-release.sh "$TAG" "$OPENWRT_VERSION"
+
+      - name: Release notes
+        run: |
+          sed -e "s/@TAG@/$TAG/g" -e "s/@OPENWRT@/$OPENWRT_VERSION/g" -e "s/@XRAY@/$XRAY_VERSION/g" \
+              -e "s|OWNER/REPO|$GITHUB_REPOSITORY|g" \
+              .github/release-body.md > release/NOTES.md
+          { echo; echo '### SHA-256'; echo '```'; cat release/SHA256SUMS; echo '```'; } >> release/NOTES.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: xguard ${{ env.TAG }}
+          body_path: release/NOTES.md
+          # 0.x releases are pre-releases until they have been verified on real devices
+          prerelease: ${{ startsWith(env.TAG, 'v0.') }}
+          files: |
+            release/xguard-*
+            release/xray.gz
+            release/xray.gz.sha256
+            release/xray.version
+            release/SHA256SUMS

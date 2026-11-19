@@ -1,0 +1,3 @@
+# xguard: packets that xguard redirected/tproxied to xray carry this mark (set in table inet xguard).
+# fw4 would otherwise reject them on zones whose input policy is not ACCEPT.
+meta mark & 0xff000000 == 0x58000000 counter accept comment "xguard transparent proxy"

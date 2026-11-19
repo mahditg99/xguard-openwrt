@@ -1,0 +1,461 @@
+#!/bin/sh
+# xguardd - xguard supervisor.
+#
+#   xguardd            run forever (started by procd): keeps xray alive, never gives up
+#   xguardd guard      apply the kill-switch ruleset once and exit (called early at boot)
+#   xguardd unguard    remove ruleset + DNS hook (when xguard is disabled)
+#
+# Principles: fail closed (the guard is applied before anything else and survives every
+# restart), retry forever with capped backoff, keep memory bounded (xray lives in tmpfs).
+
+RUN=${XGUARD_RUN:-/tmp/xguard}
+LIB=${XGUARD_LIB:-/usr/lib/xguard}
+XRAY=$RUN/xray
+CONF=${XGUARD_CONF:-/etc/config/xguard}
+ETC=${XGUARD_ETC:-/etc/xguard}
+DNSBAK=$ETC/dnsmasq.orig
+DNSMASQ_INIT=${XGUARD_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
+MARK=0x58000000/0xff000000
+
+gen() { ucode "$LIB/gen.uc" "$@"; }
+
+log() {
+	logger -t xguardd "$*"
+	printf '%s %s\n' "$(date '+%F %T')" "$*" >> $RUN/xguardd.log
+}
+
+opt() { gen get "$1" "$2" 2>/dev/null; }
+
+mkdir -p $RUN $ETC
+
+# ---------------------------------------------------------------- kill-switch
+
+apply_guard() {
+	local new=$RUN/guard.nft.new
+	if ! gen nft > $new 2>$RUN/gen.err; then
+		log "ruleset generation failed: $(head -c 200 $RUN/gen.err)"
+		gen lockdown > $new 2>/dev/null
+	fi
+	if [ ! -s $new ]; then
+		# disabled
+		nft delete table inet xguard 2>/dev/null
+		rm -f $new $RUN/guard.nft
+		return 0
+	fi
+	if [ -f $RUN/guard.nft ] && cmp -s $RUN/guard.nft $new && nft list table inet xguard >/dev/null 2>&1; then
+		rm -f $new
+		return 0
+	fi
+	if nft -f $new 2>$RUN/nft.err; then
+		mv $new $RUN/guard.nft
+		return 0
+	fi
+	log "full ruleset rejected by nft ($(head -c 200 $RUN/nft.err)); falling back to lockdown (kill-switch only)"
+	gen lockdown > $new 2>/dev/null
+	if [ -s $new ] && nft -f $new 2>>$RUN/nft.err; then
+		mv $new $RUN/guard.nft
+		return 1
+	fi
+	log "LOCKDOWN FAILED - kill-switch not active!"
+	return 2
+}
+
+setup_routing() {
+	ip rule show | grep -q "fwmark 0x58000000/0xff000000" || \
+		ip rule add fwmark $MARK lookup 100 priority 100 2>/dev/null
+	ip route replace local 0.0.0.0/0 dev lo table 100 2>/dev/null
+}
+
+teardown_routing() {
+	ip rule del fwmark $MARK lookup 100 2>/dev/null
+	ip route flush table 100 2>/dev/null
+}
+
+# dnsmasq must resolve only through xray's DNS inbound (no DNS leak, fails closed)
+dns_hook() {
+	local port want cur changed=0
+	port=$(opt dns_port 15353)
+	want="127.0.0.1#$port"
+	if [ "$1" = on ]; then
+		cur=$(uci -q get dhcp.@dnsmasq[0].server)
+		if [ "$cur" != "$want" ] || [ "$(uci -q get dhcp.@dnsmasq[0].noresolv)" != 1 ]; then
+			if [ ! -f $DNSBAK ]; then
+				{ echo "noresolv=$(uci -q get dhcp.@dnsmasq[0].noresolv)"; echo "server=$cur"; } > $DNSBAK
+			fi
+			uci -q delete dhcp.@dnsmasq[0].server
+			uci -q add_list dhcp.@dnsmasq[0].server="$want"
+			uci -q set dhcp.@dnsmasq[0].noresolv=1
+			changed=1
+		fi
+	else
+		if [ -f $DNSBAK ]; then
+			uci -q delete dhcp.@dnsmasq[0].server
+			for s in $(sed -n 's/^server=//p' $DNSBAK); do uci -q add_list dhcp.@dnsmasq[0].server="$s"; done
+			v=$(sed -n 's/^noresolv=//p' $DNSBAK)
+			if [ -n "$v" ]; then uci -q set dhcp.@dnsmasq[0].noresolv="$v"; else uci -q delete dhcp.@dnsmasq[0].noresolv; fi
+			rm -f $DNSBAK
+			changed=1
+		fi
+	fi
+	if [ $changed = 1 ]; then
+		uci -q commit dhcp
+		pidof dnsmasq >/dev/null 2>&1 && $DNSMASQ_INIT reload >/dev/null 2>&1
+	fi
+}
+
+if [ "$1" = guard ]; then
+	apply_guard
+	[ "$(opt enabled 0)" = 1 ] && { setup_routing; dns_hook on; }
+	exit 0
+fi
+if [ "$1" = unguard ]; then
+	nft delete table inet xguard 2>/dev/null
+	teardown_routing
+	dns_hook off
+	exit 0
+fi
+
+# single instance
+exec 9>$RUN/lock
+flock -n 9 || exit 0
+
+# ------------------------------------------------------------------- helpers
+
+XPID=; SPID=; CUR=; BACKOFF=1; RESTARTS=0; FAILS=0; STARTED=0; STATUS=starting; MSG=; LASTSYNC=0
+TICK=${XGUARD_TICK:-5}
+
+setstate() {
+	local rss=0 avail up=0 ver=
+	[ -n "$XPID" ] && [ -r /proc/$XPID/status ] && rss=$(awk '/^VmRSS/{print $2}' /proc/$XPID/status)
+	avail=$(awk '/^MemAvailable/{print $2}' /proc/meminfo)
+	[ "$STARTED" -gt 0 ] && up=$(( $(date +%s) - STARTED ))
+	[ -x $XRAY ] && ver=$(cat $RUN/xray.version 2>/dev/null)
+	{
+		echo "status=$STATUS"
+		echo "node=$CUR"
+		echo "alive=${ALIVE:-0}"
+		echo "delay=${DELAY:-0}"
+		echo "up_bytes=${UPB:-0}"
+		echo "down_bytes=${DOWNB:-0}"
+		echo "rss_kb=${rss:-0}"
+		echo "avail_kb=${avail:-0}"
+		echo "uptime=$up"
+		echo "restarts=$RESTARTS"
+		echo "fails=$FAILS"
+		echo "xray_version=$ver"
+		echo "msg=$MSG"
+		echo "time=$(date +%s)"
+	} > $RUN/state.tmp && mv $RUN/state.tmp $RUN/state
+}
+
+trim_logs() {
+	for f in $RUN/xray.log $RUN/xguardd.log; do
+		[ -f $f ] || continue
+		if [ "$(wc -c < $f)" -gt 65536 ]; then
+			tail -n 100 $f > $f.prev
+			: > $f
+		fi
+	done
+}
+
+# HTTP "Date:" header over plain HTTP: the router has no RTC and NTP (udp/123) may be blocked,
+# but TLS (xray download, probes) needs a sane clock.
+# busybox nc here has no -w: bound it with a watchdog
+http_head() {
+	local out=$RUN/head.tmp p w
+	( printf 'HEAD / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n' "$1" | nc "$1" 80 > $out 2>/dev/null ) &
+	p=$!
+	# the watchdog must not inherit our stdout, or $(http_head ...) would wait for its sleep
+	( sleep 8; for c in $(pgrep -P $p 2>/dev/null); do kill $c 2>/dev/null; done; kill $p 2>/dev/null ) >/dev/null 2>&1 &
+	w=$!
+	wait $p 2>/dev/null
+	kill $w 2>/dev/null
+	tr -d '\r' < $out 2>/dev/null
+	rm -f $out
+}
+
+fix_time() {
+	local h line d mon
+	for h in $(opt time_hosts "1.1.1.1 neverssl.com"); do
+		line=$(http_head "$h" | sed -n 's/^[Dd]ate: *//p' | head -n1)
+		[ -n "$line" ] || continue
+		# Wed, 19 Nov 2026 11:55:08 GMT
+		set -- $line
+		case "$3" in Jan) mon=01;; Feb) mon=02;; Mar) mon=03;; Apr) mon=04;; May) mon=05;; Jun) mon=06;;
+			Jul) mon=07;; Aug) mon=08;; Sep) mon=09;; Oct) mon=10;; Nov) mon=11;; Dec) mon=12;; *) continue;; esac
+		d="$4-$mon-$(printf %02d "$2") $5"
+		now=$(date -u +%s)
+		want=$(date -u -d "$d" +%s 2>/dev/null) || continue
+		diff=$((want - now)); [ $diff -lt 0 ] && diff=$((0 - diff))
+		if [ $diff -gt 90 ]; then
+			date -u -s "$d" >/dev/null 2>&1 && log "clock was off by ${diff}s, set to $d UTC (from $h)"
+		fi
+		return 0
+	done
+	return 1
+}
+
+xray_ok() {
+	[ -x $XRAY ] || return 1
+	$XRAY version > $RUN/xray.version.new 2>/dev/null || return 1
+	head -n1 $RUN/xray.version.new > $RUN/xray.version
+	rm -f $RUN/xray.version.new
+	return 0
+}
+
+# endless retry until we have a working xray binary in RAM
+ensure_xray() {
+	local wait=2
+	while :; do
+		[ -f $RUN/hold ] && return 1
+		xray_ok && return 0
+		rm -f $XRAY
+		if [ -z "$(gen sources)" ]; then
+			STATUS=need-xray; MSG="no xray binary in RAM and no download source configured (push one with tools/push-xray.ps1)"
+			setstate
+			sleep $TICK
+			[ "$(opt enabled 0)" = 1 ] || return 1
+			continue
+		fi
+		STATUS=fetching-xray; MSG="downloading xray"; setstate
+		fix_time
+		if /usr/libexec/xguard/fetch $XRAY; then
+			chmod 755 $XRAY
+			xray_ok && { log "xray ready: $(cat $RUN/xray.version)"; return 0; }
+		fi
+		log "xray download failed, retry in ${wait}s"
+		sleep $wait
+		wait=$((wait * 2)); [ $wait -gt 60 ] && wait=60
+		[ "$(opt enabled 0)" = 1 ] || return 1
+	done
+}
+
+# A dead child stays a zombie until reaped, and `kill -0` succeeds on zombies:
+# look at the process state instead (and reap it with wait).
+pid_alive() {
+	[ -n "$1" ] && [ -r /proc/$1/stat ] || return 1
+	case "$(sed 's/^.*) //; s/ .*//' /proc/$1/stat 2>/dev/null)" in
+		Z|X|"") wait $1 2>/dev/null; return 1;;
+	esac
+	return 0
+}
+
+stop_pid() {
+	[ -n "$1" ] || return 0
+	kill $1 2>/dev/null
+	local i=0
+	while pid_alive $1 && [ $i -lt 6 ]; do sleep 1; i=$((i+1)); done
+	if pid_alive $1; then
+		kill -9 $1 2>/dev/null
+		sleep 1
+	fi
+	wait $1 2>/dev/null
+	return 0
+}
+
+stop_children() {
+	stop_pid "$XPID"
+	stop_pid "$SPID"
+	XPID=; SPID=; ALIVE=0; DELAY=0
+	STARTED=0
+}
+
+start_ssh() {
+	local info type name host port user pass key
+	info=$(gen nodeinfo "$CUR") || return 1
+	type=${info%%|*}
+	[ "$type" = ssh ] || return 0
+	IFS='|' read -r type name host port user pass key <<EOF
+$info
+EOF
+	[ -n "$key" ] || key=$ETC/id_ed25519
+	local sp; sp=$(opt ssh_socks_port 10809)
+	set -- -N -D 127.0.0.1:$sp -p "$port" \
+		-o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+		-o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$ETC/known_hosts \
+		-o TCPKeepAlive=yes -o Compression=no -o LogLevel=ERROR
+	if [ -n "$pass" ]; then
+		SSHPASS="$pass" sshpass -e ssh "$@" -o PreferredAuthentications=password,keyboard-interactive "$user@$host" >/dev/null 2>>$RUN/ssh.err &
+	else
+		ssh "$@" -o BatchMode=yes -i "$key" "$user@$host" >/dev/null 2>>$RUN/ssh.err &
+	fi
+	SPID=$!
+}
+
+start_xray() {
+	local mem; mem=$(opt mem_limit 28)
+	if ! gen xray "$CUR" > $RUN/config.json 2>$RUN/gen.err; then
+		MSG="config for node $CUR invalid: $(head -c 160 $RUN/gen.err)"; log "$MSG"; return 1
+	fi
+	start_ssh
+	: > $RUN/xray.log
+	GOMEMLIMIT=${mem}MiB GOGC=50 GODEBUG=madvdontneed=1 GOMAXPROCS=2 \
+		$XRAY run -c $RUN/config.json >/dev/null 2>&1 &
+	XPID=$!
+	STARTED=$(date +%s)
+	FAILS=0; ALIVE=0
+	RESTARTS=$((RESTARTS + 1))
+	log "xray started (node $CUR, pid $XPID, GOMEMLIMIT=${mem}MiB)"
+	return 0
+}
+
+next_node() {
+	local first= found=0 n
+	for n in $ORDER; do
+		[ -z "$first" ] && first=$n
+		if [ $found = 1 ]; then echo "$n"; return; fi
+		[ "$n" = "$1" ] && found=1
+	done
+	echo "$first"
+}
+
+backoff_sleep() {
+	log "retry in ${BACKOFF}s"
+	sleep $BACKOFF
+	BACKOFF=$((BACKOFF * 2)); [ $BACKOFF -gt 30 ] && BACKOFF=30
+}
+
+cleanup() {
+	stop_children
+	exit 0
+}
+trap cleanup TERM INT
+
+# ---------------------------------------------------------------------- main
+
+log "xguardd starting"
+SIG=
+ENABLED=0
+HAVE_RULES=0
+
+reconfigure() {
+	apply_guard; HAVE_RULES=$?
+	ENABLED=$(opt enabled 0)
+	if [ "$ENABLED" = 1 ]; then
+		setup_routing
+		dns_hook on
+	else
+		teardown_routing
+		dns_hook off
+	fi
+	ORDER=$(gen order)
+	if [ -z "$CUR" ] || ! echo "$ORDER" | grep -qx "$CUR"; then
+		CUR=$(echo "$ORDER" | head -n1)
+	fi
+}
+
+while :; do
+	nsig=$(cat $CONF /tmp/dhcp.leases 2>/dev/null | md5sum | cut -c1-32)
+	if [ "$nsig" != "$SIG" ]; then
+		SIG=$nsig
+		oldenabled=$ENABLED; oldcur=$CUR
+		reconfigure
+		# configuration changed: restart xray so the new node/ports take effect
+		if [ -n "$XPID" ] && { [ "$ENABLED" != 1 ] || [ "$CUR" != "$oldcur" ] || [ "$(gen xray "$CUR" 2>/dev/null | md5sum)" != "$(md5sum < $RUN/config.json)" ]; }; then
+			log "configuration changed, restarting xray"
+			stop_children
+		fi
+	fi
+
+	if [ "$ENABLED" != 1 ]; then
+		STATUS=disabled; MSG=; setstate
+		stop_children
+		sleep $TICK
+		continue
+	fi
+
+	# no RTC and NTP may be blocked: TLS/Reality/VMess all need a correct clock
+	NOWT=$(date +%s)
+	if [ "$LASTSYNC" -eq 0 ] || [ $((NOWT - LASTSYNC)) -gt 3600 ]; then
+		fix_time
+		LASTSYNC=$(date +%s)
+	fi
+
+	if [ -z "$CUR" ]; then
+		STATUS=no-node; MSG="enabled, but no usable node configured (kill-switch is active)"; setstate
+		sleep $TICK
+		continue
+	fi
+
+	# manual command from the UI / xguardctl
+	if [ -f $RUN/cmd ]; then
+		cmd=$(cat $RUN/cmd); rm -f $RUN/cmd
+		case "$cmd" in
+		restart) log "restart requested"; stop_children ;;
+		update-xray) log "xray update requested"; stop_children; rm -f $XRAY ;;
+		next) log "switch to next node requested"; stop_children; CUR=$(next_node "$CUR") ;;
+		esac
+	fi
+
+	if [ -z "$XPID" ]; then
+		if [ -f $RUN/hold ]; then STATUS=updating; MSG="xray binary is being replaced"; setstate; sleep 2; continue; fi
+		[ $HAVE_RULES -ge 2 ] && { STATUS=error; MSG="kill-switch could not be applied"; setstate; sleep $TICK; reconfigure; continue; }
+		ensure_xray || continue
+		STATUS=starting; MSG=; setstate
+		if start_xray; then
+			sleep 1
+			pid_alive $XPID || { log "xray died right after start"; XPID=; stop_children; backoff_sleep; continue; }
+		else
+			backoff_sleep
+			CUR=$(next_node "$CUR")
+			continue
+		fi
+	fi
+
+	sleep $TICK
+
+	# --- supervision tick -------------------------------------------------
+	if ! pid_alive $XPID; then
+		log "xray exited unexpectedly"
+		stop_children; STATUS=restarting; setstate
+		backoff_sleep
+		continue
+	fi
+	if [ -n "$SPID" ] && ! pid_alive $SPID; then
+		log "ssh tunnel exited, reconnecting"
+		SPID=; start_ssh
+	fi
+
+	rss=$(awk '/^VmRSS/{print $2}' /proc/$XPID/status 2>/dev/null)
+	rsskill=$(opt rss_kill 46)
+	if [ -n "$rss" ] && [ "$rss" -gt $((rsskill * 1024)) ]; then
+		log "xray RSS ${rss}kB above ${rsskill}MiB, restarting (kill-switch stays active)"
+		stop_children; STATUS=restarting; setstate
+		continue
+	fi
+	avail=$(awk '/^MemAvailable/{print $2}' /proc/meminfo)
+	if [ "$avail" -lt 5000 ]; then
+		sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+		avail=$(awk '/^MemAvailable/{print $2}' /proc/meminfo)
+		if [ "$avail" -lt 3500 ]; then
+			log "only ${avail}kB available, restarting xray to free memory"
+			stop_children; STATUS=restarting; setstate
+			continue
+		fi
+	fi
+
+	vars=$(uclient-fetch -q -T 3 -O - "http://127.0.0.1:$(opt metrics_port 11111)/debug/vars" 2>/dev/null | gen vars 2>/dev/null)
+	set -- $vars
+	known=${1:-0}; ALIVE=${2:-0}; DELAY=${3:-0}; UPB=${4:-0}; DOWNB=${5:-0}
+	age=$(( $(date +%s) - STARTED ))
+
+	if [ "$known" = 1 ] && [ "$ALIVE" = 1 ]; then
+		FAILS=0; BACKOFF=1; STATUS=running; MSG=
+	elif [ "$known" = 1 ] || [ $age -gt 90 ]; then
+		FAILS=$((FAILS + 1)); STATUS=degraded
+		MSG="tunnel not passing traffic (kill-switch active), attempt $FAILS"
+		limit=$(( $(opt fail_threshold 3) * $(opt probe_interval 10) / TICK )); [ $limit -lt 2 ] && limit=2
+		if [ $FAILS -ge $limit ]; then
+			nxt=$(next_node "$CUR")
+			if [ "$nxt" != "$CUR" ]; then log "node $CUR is dead, switching to $nxt"; CUR=$nxt; else log "node $CUR is dead, reconnecting"; fi
+			stop_children; STATUS=restarting; setstate
+			backoff_sleep
+			continue
+		fi
+	else
+		STATUS=starting
+	fi
+
+	trim_logs
+	setstate
+done

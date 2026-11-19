@@ -1,0 +1,60 @@
+#!/bin/sh
+# xguardctl - small command line helper
+
+RUN=/tmp/xguard
+LIB=/usr/lib/xguard
+
+case "$1" in
+status)
+	cat $RUN/state 2>/dev/null || echo "status=not-running"
+	;;
+logs)
+	echo "--- xguardd"; tail -n 40 $RUN/xguardd.log 2>/dev/null
+	echo "--- xray";    tail -n 40 $RUN/xray.log 2>/dev/null
+	[ -s $RUN/ssh.err ] && { echo "--- ssh"; tail -n 20 $RUN/ssh.err; }
+	;;
+restart|next|update-xray)
+	echo "$1" > $RUN/cmd
+	echo "requested: $1"
+	;;
+enable|disable)
+	uci set xguard.main.enabled=$([ "$1" = enable ] && echo 1 || echo 0)
+	uci commit xguard
+	echo "$1d"
+	;;
+genkey)
+	# SSH key used by ssh:// xray sources (mirror) - prints the public key
+	mkdir -p /etc/xguard
+	[ -f /etc/xguard/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -C xguard-router -f /etc/xguard/id_ed25519
+	cat /etc/xguard/id_ed25519.pub
+	;;
+push-xray)
+	# usage (from a PC):  cat xray.gz | ssh root@router xguardctl push-xray <sha256-of-uncompressed-binary>
+	# tmpfs cannot hold two copies, so the running xray is stopped and removed first.
+	mkdir -p $RUN
+	touch $RUN/hold
+	echo update-xray > $RUN/cmd
+	i=0
+	while [ $i -lt 30 ] && { [ -e $RUN/xray ] || pgrep -x xray >/dev/null 2>&1; }; do sleep 1; i=$((i+1)); done
+	rm -f $RUN/xray $RUN/xray.new
+	if ! gunzip -c > $RUN/xray.new; then rm -f $RUN/xray.new $RUN/hold; echo "gunzip failed" >&2; exit 1; fi
+	if [ -n "$2" ]; then
+		got=$(sha256sum $RUN/xray.new | cut -d' ' -f1)
+		[ "$got" = "$2" ] || { rm -f $RUN/xray.new $RUN/hold; echo "sha256 mismatch ($got)" >&2; exit 1; }
+	fi
+	chmod 755 $RUN/xray.new
+	$RUN/xray.new version >/dev/null 2>&1 || { rm -f $RUN/xray.new $RUN/hold; echo "binary does not run on this device" >&2; exit 1; }
+	mv $RUN/xray.new $RUN/xray
+	rm -f $RUN/hold
+	echo "xray installed in RAM: $($RUN/xray version | head -n1)"
+	;;
+test-config)
+	# check the generated xray config of a node with xray itself
+	[ -x $RUN/xray ] || { echo "no xray in RAM"; exit 1; }
+	ucode $LIB/gen.uc xray "$2" > $RUN/config.test.json && $RUN/xray run -test -c $RUN/config.test.json
+	;;
+*)
+	echo "usage: xguardctl status|logs|restart|next|update-xray|enable|disable|genkey|push-xray [sha256]|test-config <node>"
+	exit 1
+	;;
+esac

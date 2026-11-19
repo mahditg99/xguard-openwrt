@@ -1,0 +1,17 @@
+# build outputs (published as GitHub release assets instead)
+dist/
+release/
+tools/out/
+tools/files/
+tools/xguard-files.tar
+tools/openwrt-imagebuilder-*/
+tools/sha256sums
+
+# NEVER commit router backups: they contain Wi-Fi passwords, SSH host keys and calibration data
+backup/
+*.tar.gz
+!docs/**/*.tar.gz
+
+# local test leftovers
+tests/*.log
+*.part

@@ -1,0 +1,20 @@
+#!/bin/sh
+# first boot of an image that contains xguard
+
+/etc/init.d/xguard enable
+
+# zram swap: compress cold pages (the xray binary in tmpfs, Go heap) instead of running out of RAM
+uci -q set system.@system[0].zram_size_mb='48'
+uci -q set system.@system[0].zram_comp_algo='lzo-rle'
+uci -q commit system
+
+# our web UI lives in /www/xguard and is served by uhttpd from /www.
+# (rfc1918_filter is DNS-rebinding protection, not an access list; access is protected by the root password.)
+uci -q set uhttpd.main.rfc1918_filter='1'
+uci -q commit uhttpd
+
+# SSH client state for ssh tunnels / ssh:// mirrors
+mkdir -p /etc/xguard
+chmod 700 /etc/xguard
+
+exit 0

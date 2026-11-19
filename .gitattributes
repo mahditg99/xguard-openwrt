@@ -1,0 +1,8 @@
+# Everything that runs on the router (or in CI) must keep LF endings, also when committed from Windows.
+* text=auto eol=lf
+*.ps1 text eol=lf
+*.sh text eol=lf
+files/** text eol=lf
+*.bin binary
+*.gz binary
+*.tar binary

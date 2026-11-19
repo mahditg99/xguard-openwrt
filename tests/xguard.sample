@@ -1,0 +1,85 @@
+config main 'main'
+	option enabled '1'
+	option node 'n_reality'
+	option dns_remote 'tcp://1.1.1.1'
+	list wan_if 'wan'
+	list source 'https://example.invalid/xray.gz'
+
+config node 'n_ws'
+	option name 'vless ws tls'
+	option type 'link'
+	option link 'vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws&security=tls&sni=example.com&host=example.com&path=%2Fws%3Fed%3D2048&fp=chrome&encryption=none#ws-node'
+
+config node 'n_reality'
+	option name 'vless reality'
+	option type 'link'
+	option link 'vless://11111111-2222-3333-4444-555555555555@203.0.113.7:443?type=tcp&security=reality&sni=www.microsoft.com&fp=chrome&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=ab12&flow=xtls-rprx-vision#reality'
+
+config node 'n_xhttp'
+	option name 'vless xhttp'
+	option type 'link'
+	option link 'vless://11111111-2222-3333-4444-555555555555@example.com:443?type=xhttp&security=tls&sni=example.com&path=%2Fx&mode=auto#xhttp'
+
+config node 'n_grpc'
+	option name 'trojan grpc'
+	option type 'link'
+	option link 'trojan://pa%24%24word@example.com:443?type=grpc&serviceName=svc&security=tls&sni=example.com#trojan-grpc'
+
+config node 'n_ss'
+	option name 'shadowsocks'
+	option type 'link'
+	option link 'ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTp0ZXN0cGFzcw@198.51.100.9:8388#ss'
+
+config node 'n_vmess'
+	option name 'vmess'
+	option type 'link'
+	option link 'vmess://eyJ2IjoiMiIsInBzIjoidm0iLCJhZGQiOiJleGFtcGxlLmNvbSIsInBvcnQiOiI0NDMiLCJpZCI6IjExMTExMTExLTIyMjItMzMzMy00NDQ0LTU1NTU1NTU1NTU1NSIsImFpZCI6IjAiLCJzY3kiOiJhdXRvIiwibmV0Ijoid3MiLCJ0eXBlIjoibm9uZSIsImhvc3QiOiJleGFtcGxlLmNvbSIsInBhdGgiOiIvdm0iLCJ0bHMiOiJ0bHMiLCJzbmkiOiJleGFtcGxlLmNvbSJ9'
+
+config node 'n_ssh'
+	option name 'ssh tunnel'
+	option type 'ssh'
+	option host '203.0.113.20'
+	option port '22'
+	option user 'root'
+	option password 'secret'
+
+config node 'n_chain'
+	option name 'json chain'
+	option type 'json'
+	option json '[{"protocol":"vless","settings":{"address":"a.example.com","port":443,"id":"11111111-2222-3333-4444-555555555555","encryption":"none"},"streamSettings":{"network":"ws","security":"tls"}},{"protocol":"socks","settings":{"address":"127.0.0.1","port":10809}}]'
+
+config iface
+	option name 'phy0-ap0'
+	option mode 'vpn'
+
+config iface
+	option name 'phy1-ap0'
+	option mode 'direct'
+
+config iface
+	option name 'lan2'
+	option mode 'block'
+
+config device
+	option mac 'AA:BB:CC:DD:EE:FF'
+	option mode 'direct'
+
+config device
+	option ip '192.168.5.77'
+	option mode 'vpn'
+
+config bypass
+	list cidr '203.0.113.0/24'
+	list cidr '8.8.8.8'
+
+config limit
+	option name 'kid'
+	option ip '192.168.5.60'
+	option down '4000'
+	option up '1000'
+
+config limit
+	option name 'guest'
+	option iface 'phy1-ap0'
+	option down '2000'
+	option up '0'

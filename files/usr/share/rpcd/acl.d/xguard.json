@@ -1,0 +1,15 @@
+{
+	"xguard": {
+		"description": "xguard VPN",
+		"read": {
+			"ubus": {
+				"xguard": [ "status", "get_config", "logs", "devices", "test_link" ]
+			}
+		},
+		"write": {
+			"ubus": {
+				"xguard": [ "save_config", "command" ]
+			}
+		}
+	}
+}

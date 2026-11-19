@@ -1,0 +1,37 @@
+#!/bin/sh /etc/rc.common
+# xguard - fail-closed transparent xray VPN
+
+START=18
+STOP=99
+USE_PROCD=1
+
+start_service() {
+	mkdir -p /tmp/xguard
+	# kill-switch first, synchronously, before dnsmasq (START=19) and the network come up
+	/usr/sbin/xguardd guard
+
+	procd_open_instance
+	procd_set_param command /usr/sbin/xguardd
+	# never give up: respawn forever, 5s apart
+	procd_set_param respawn 3600 5 0
+	procd_set_param stdout 0
+	procd_set_param stderr 0
+	procd_close_instance
+}
+
+stop_service() {
+	killall xray 2>/dev/null
+	for p in $(pgrep -f 'ssh -N -D 127.0.0.1'); do kill $p 2>/dev/null; done
+	# stopping the service while enabled keeps the kill-switch (fail closed);
+	# only an explicit enabled=0 removes it
+	[ "$(uci -q get xguard.main.enabled)" = 1 ] || /usr/sbin/xguardd unguard
+}
+
+service_triggers() {
+	procd_add_reload_trigger xguard
+}
+
+reload_service() {
+	# the supervisor watches /etc/config/xguard itself; nothing to do
+	:
+}

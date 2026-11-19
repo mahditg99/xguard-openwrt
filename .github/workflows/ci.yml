@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax (POSIX sh for the router, bash for tools)
+        run: |
+          for f in files/usr/sbin/xguardd files/usr/sbin/xguardctl files/usr/libexec/xguard/fetch \
+                   files/etc/init.d/xguard files/etc/uci-defaults/90-xguard tests/sim-supervisor.sh tools/mirror/*.sh; do
+            echo "sh -n $f"; sh -n "$f"
+          done
+          for f in tools/*.sh; do echo "bash -n $f"; bash -n "$f"; done
+
+      - name: Web UI JavaScript syntax
+        run: |
+          sed -n '/^<script>/,/^<\/script>/p' files/www/xguard/index.html | sed '1d;$d' > /tmp/ui.js
+          node --check /tmp/ui.js
+
+      - name: JSON files
+        run: python3 -m json.tool files/usr/share/rpcd/acl.d/xguard.json > /dev/null
+
+      - name: Release scripts do not contain secrets or backups
+        run: |
+          if git ls-files | grep -E '^(backup/|.*\.tar\.gz$)'; then
+            echo "router backups / archives must not be committed" >&2
+            exit 1
+          fi

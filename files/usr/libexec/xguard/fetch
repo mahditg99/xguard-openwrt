@@ -1,0 +1,98 @@
+#!/bin/sh
+# fetch <outfile>: download the xray binary into RAM (tmpfs), verify, never keep a second copy.
+#
+# Sources come from `list source` in /etc/config/xguard, tried in order:
+#   https://host/path/xray.gz         the .gz is streamed straight through gunzip (peak RAM = one binary);
+#                                     https://host/path/xray.gz.sha256 holds sha256 of the UNCOMPRESSED binary
+#   ssh://user@host[:port]/path/xray.gz   runs `cat /path/xray.gz` (and .sha256) over OpenSSH with
+#                                     /etc/xguard/id_ed25519 (works with a forced-command mirror key)
+# exit 0 = success, 1 = nothing worked this round (caller retries with backoff, forever)
+#
+# Chicken-and-egg: while xguard is enabled, dnsmasq only resolves through xray, which is not running yet.
+# So host names of the sources are resolved directly (bootstrap_dns) and handed to dnsmasq temporarily
+# through /tmp/hosts, so TLS still sees the real host name.
+
+OUT="$1"
+[ -n "$OUT" ] || exit 2
+LIB=${XGUARD_LIB:-/usr/lib/xguard}
+ETC=${XGUARD_ETC:-/etc/xguard}
+PART="$OUT.part"
+KEY=$ETC/id_ed25519
+SSHOPTS="-i $KEY -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$ETC/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o LogLevel=ERROR"
+HOSTS_DIR=${XGUARD_HOSTS_DIR:-/tmp/hosts}
+BOOT=$HOSTS_DIR/xguard-bootstrap
+
+say() { logger -t xguard-fetch "$*"; }
+
+cleanup() {
+	if [ -f "$BOOT" ]; then
+		rm -f "$BOOT"
+		killall -HUP dnsmasq 2>/dev/null
+	fi
+	rm -f "$PART"
+}
+trap cleanup EXIT
+
+is_ip() {
+	case "$1" in ""|*[!0-9.]*) return 1;; *) return 0;; esac
+}
+
+# make $1 resolvable although the normal resolver is the (not yet running) tunnel
+bootstrap_host() {
+	local host="$1" s ip
+	is_ip "$host" && return 0
+	for s in $(ucode "$LIB/gen.uc" get bootstrap_dns "1.1.1.1 8.8.8.8"); do
+		ip=$(nslookup "$host" "$s" 2>/dev/null | awk '/^Name:/{f=1;next} f && /^Address/{print $NF}' \
+			| grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+		if [ -n "$ip" ]; then
+			mkdir -p "$HOSTS_DIR"
+			echo "$ip $host" >> "$BOOT"
+			killall -HUP dnsmasq 2>/dev/null
+			sleep 1
+			return 0
+		fi
+	done
+	say "could not resolve $host via bootstrap DNS"
+	return 1
+}
+
+verify() {
+	local want="$1" got
+	[ ${#want} -eq 64 ] || { say "bad checksum file"; return 1; }
+	got=$(sha256sum "$PART" | cut -d' ' -f1)
+	[ "$got" = "$want" ] || { say "sha256 mismatch (got $got)"; return 1; }
+	chmod 755 "$PART" && "$PART" version >/dev/null 2>&1 || { say "downloaded binary does not run"; return 1; }
+	mv "$PART" "$OUT"
+}
+
+for src in $(ucode "$LIB/gen.uc" sources); do
+	rm -f "$PART"
+	case "$src" in
+	http://*|https://*)
+		h=${src#*://}; h=${h%%/*}; h=${h%%:*}
+		bootstrap_host "$h" || continue
+		want=$(uclient-fetch -q -T 20 -O - "$src.sha256" 2>/dev/null | awk '{print $1; exit}')
+		[ -n "$want" ] || { say "no checksum at $src.sha256"; continue; }
+		uclient-fetch -q -T 30 -O - "$src" 2>/dev/null | gunzip -c > "$PART" 2>/dev/null || { say "download failed: $src"; rm -f "$PART"; continue; }
+		verify "$want" && { say "xray installed from $src"; exit 0; }
+		;;
+	ssh://*)
+		rest=${src#ssh://}
+		hostpart=${rest%%/*}
+		path=/${rest#*/}
+		userhost=${hostpart%%:*}
+		port=22
+		case "$hostpart" in *:*) port=${hostpart##*:};; esac
+		bootstrap_host "${userhost#*@}" || continue
+		want=$(ssh $SSHOPTS -p "$port" "$userhost" "cat $path.sha256" 2>/dev/null | awk '{print $1; exit}')
+		[ -n "$want" ] || { say "no checksum from $src"; continue; }
+		ssh $SSHOPTS -p "$port" "$userhost" "cat $path" 2>/dev/null | gunzip -c > "$PART" 2>/dev/null || { say "ssh download failed: $src"; rm -f "$PART"; continue; }
+		verify "$want" && { say "xray installed from $src"; exit 0; }
+		;;
+	*)
+		say "unsupported source: $src"
+		;;
+	esac
+	rm -f "$PART"
+done
+exit 1
