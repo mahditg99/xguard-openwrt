@@ -20,7 +20,7 @@ The supervisor (`xguardd`) watches the file (and `/tmp/dhcp.leases`) and re-appl
 | `wan_if` (list) | `wan` | Interface(s) facing the internet; forwarded traffic from `vpn`/`block` interfaces towards them is dropped. |
 | `default_mode` | `direct` | Global policy for **every** client, including devices that are not listed anywhere: `direct` = nobody is proxied unless you mark an interface/device `vpn`; `vpn` = everybody (anything not coming from `wan_if`) is proxied and cut off when the tunnel is down, unless you mark an interface/device `direct`. `block` interfaces are always cut off. Access to the router itself (web UI, SSH, DNS, DHCP) is never affected. |
 | `dns_remote` | `tcp://1.1.1.1` | DNS server used **through the tunnel** (`tcp://` is required for SSH nodes). |
-| `dns_bypass` | *(empty)* | Optional resolver (e.g. `178.22.122.100`) used **directly, outside the tunnel**, only for the domains in your `bypass` list (geo-DNS: local sites resolve to local IPs). Empty = those domains are resolved through the tunnel like everything else. |
+| `dns_bypass` | *(empty = the WAN upstream resolver, else `bootstrap_dns`)* | Optional resolver (e.g. `178.22.122.100`) used **directly, outside the tunnel**, only for the domains in your `bypass` list (geo-DNS: local sites resolve to local IPs). Empty = those domains are resolved through the tunnel like everything else. |
 | `probe_url` | `https://www.gstatic.com/generate_204` | URL xray's observatory fetches through the tunnel to decide "alive". |
 | `probe_interval` | `10` | Seconds between probes. |
 | `fail_threshold` | `3` | Dead probes in a row before switching to the next node (`fail_threshold × probe_interval` seconds). |
