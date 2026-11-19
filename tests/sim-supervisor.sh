@@ -112,6 +112,9 @@ check "user bypass is exempt from the kill-switch (after block, before vpn drops
 ' ' ' | grep -q 'block_ifs.*bypass_user.*vpn_ifs'"
 check "policy routing rule installed"               grep -q 'ip rule add fwmark 0x58000000/0xff000000 lookup 100' $SIM/calls.log
 check "dnsmasq pointed at xray DNS inbound"         grep -q 'add_list dhcp.@dnsmasq\[0\].server=127.0.0.1#15353' $SIM/calls.log
+check "bypass domain gets its own direct upstream in dnsmasq" grep -q 'add_list dhcp.@dnsmasq\[0\].server=/example.ir/' $SIM/calls.log
+check "dynamic nft set for exempted domains exists"  grep -q 'set bypass_dyn' $SIM/last-nft.rules
+check "kill-switch skips the dynamic set"            sh -c "awk '/chain guard_fwd/,/}/' $SIM/last-nft.rules | grep -q 'ip daddr @bypass_dyn return'"
 
 echo "== supervisor run"
 sh $SIM/xguardd > $SIM/daemon.out 2>&1 &

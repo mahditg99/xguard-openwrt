@@ -10,7 +10,7 @@
 //   gen.uc ifaces             print vpn interface names (for sysctl/ipv6 handling)
 //   gen.uc sources            print xray download sources, one per line
 
-import { load_config, ordered_nodes, node_by_id, gen_xray, gen_nft, gen_lockdown, parse_vars } from './core.uc';
+import { load_config, ordered_nodes, node_by_id, gen_xray, gen_nft, gen_lockdown, parse_vars, bypass_split, local_dns } from './core.uc';
 import { stdin } from 'fs';
 
 function out(s) {
@@ -68,10 +68,22 @@ case 'ifaces':
 		if (i.mode == 'vpn' || i.mode == 'block')
 			out(i.name + '\n');
 	break;
+case 'bypassdns': {
+	// line 1: resolver used outside the tunnel; then one domain per line (domain:/full: entries; keyword: cannot be a dnsmasq rule)
+	let bp = bypass_split(cfg.bypass);
+	let dns = trim(cfg.main.dns_bypass || '');
+	out((dns != '' ? dns : local_dns(cfg.main)) + '\n');
+	for (let d in bp.domains) {
+		let m = match(d, /^(domain|full):(.+)$/);
+		if (m)
+			out(m[2] + '\n');
+	}
+	break;
+}
 case 'sources':
 	for (let s in (type(cfg.main.source) == 'array' ? cfg.main.source : (cfg.main.source ? [ cfg.main.source ] : [])))
 		out(s + '\n');
 	break;
 default:
-	die('usage: gen.uc xray|nft|lockdown|order|nodeinfo|vars|get|ifaces|sources');
+	die('usage: gen.uc xray|nft|lockdown|order|nodeinfo|vars|get|ifaces|sources|bypassdns');
 }

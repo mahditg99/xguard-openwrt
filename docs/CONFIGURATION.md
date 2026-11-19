@@ -113,6 +113,7 @@ Destinations that clients on `vpn` interfaces may reach **directly**, outside th
 - `geosite:` / `geoip:` are **not supported** (the `.dat` files are not shipped and xray would refuse to start), neither is a bare word like `localhost`. Invalid entries are rejected by the web UI; in a hand-edited config they are ignored and written to `xguardctl logs` as `config warning`.
 - A domain rule cannot see traffic that carries no name (plain IP, encrypted SNI/ECH); such traffic simply goes through the VPN.
 - To also resolve these domains outside the tunnel set `dns_bypass` (see above).
+- **Working even while xray is down:** `domain:`/`full:` entries are also given to dnsmasq as a direct upstream (`server=/domain/ip`, works with the stock dnsmasq) and, **if dnsmasq was built with nftset (package `dnsmasq-full`)**, their resolved addresses go into the nft set `bypass_dyn`, which the kill-switch and the redirect skip, exactly like an IP entry. With the stock dnsmasq (`dnsmasq --version` shows `no-nftset`) domains still work whenever xray is running, which now includes a dead node (xray is no longer restarted for a single node). `keyword:` entries can only use the xray rule.
 - Use sparingly: every entry deliberately punches a hole in the VPN (not in the kill-switch).
 
 ## `config limit`

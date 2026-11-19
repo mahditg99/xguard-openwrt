@@ -375,6 +375,8 @@ function gen_nft(cfg) {
 	o += set_decl('vpn_macs', 'ether_addr', vpn_mac);
 	o += set_decl('bypass4', 'ipv4_addr', bypass, 'interval\n\t\tauto-merge');
 	o += set_decl('bypass_user', 'ipv4_addr', user_bypass, 'interval\n\t\tauto-merge');
+	// filled by dnsmasq (nftset=) with the addresses of exempted domains; entries expire by themselves
+	o += '\tset bypass_dyn {\n\t\ttype ipv4_addr\n\t\tflags timeout\n\t\ttimeout 1h\n\t\tsize 4096\n\t}\n';
 
 	// per-user speed limits (policers: drop what exceeds the rate)
 	let up_rules = '', down_rules = '', objs = '';
@@ -421,21 +423,21 @@ function gen_nft(cfg) {
 	o += '\tchain guard_fwd {\n\t\ttype filter hook forward priority -10; policy accept;\n' + skip;
 	o += '\t\tiifname @block_ifs oifname @wan_ifs counter drop\n';
 	// destinations the user explicitly exempted from the VPN are allowed to go out directly
-	o += '\t\tip daddr @bypass_user return\n';
+	o += '\t\tip daddr @bypass_user return\n\t\tip daddr @bypass_dyn return\n';
 	for (let v in vpn_match)
 		o += '\t\t' + v + ' oifname @wan_ifs counter drop\n';
 	o += '\t}\n';
 
 	// TCP -> xray (redirect)
 	o += '\tchain redir_tcp {\n\t\ttype nat hook prerouting priority -105; policy accept;\n' + skip;
-	o += noproxy + '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n';
+	o += noproxy + '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n\t\tip daddr @bypass_dyn return\n';
 	for (let v in vpn_match)
 		o += sprintf('\t\t%s meta l4proto tcp meta mark set %s redirect to :%d\n', v, MARK, rp);
 	o += '\t}\n';
 
 	// UDP -> xray (tproxy)
 	o += '\tchain tproxy_udp {\n\t\ttype filter hook prerouting priority -150; policy accept;\n' + skip;
-	o += noproxy + '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n';
+	o += noproxy + '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n\t\tip daddr @bypass_dyn return\n';
 	for (let v in vpn_match)
 		o += sprintf('\t\t%s meta nfproto ipv4 meta l4proto udp meta mark set %s tproxy ip to :%d accept\n', v, MARK, tp);
 	o += '\t}\n';
@@ -519,4 +521,4 @@ function parse_vars(txt) {
 	return r;
 }
 
-export { classify_bypass, bypass_split, load_config, ordered_nodes, node_by_id, node_chain, gen_xray, gen_nft, gen_lockdown, parse_vars };
+export { local_dns, classify_bypass, bypass_split, load_config, ordered_nodes, node_by_id, node_chain, gen_xray, gen_nft, gen_lockdown, parse_vars };
