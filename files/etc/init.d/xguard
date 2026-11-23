@@ -2,7 +2,9 @@
 # xguard - fail-closed transparent xray VPN
 
 START=18
-STOP=99
+# STOP must be low: procd runs the K scripts in ascending order and K90umount (and the network) go before 99,
+# so a late script can no longer write to flash. We flush today's usage to flash here.
+STOP=05
 USE_PROCD=1
 
 start_service() {
@@ -28,6 +30,8 @@ start_service() {
 }
 
 stop_service() {
+	# today's usage -> flash, synchronously (procd only sends TERM to the accounting instance and does not wait for it)
+	[ "$(uci -q get xguard.main.enabled)" = 1 ] && flock /tmp/xguard/acct.lock ucode /usr/lib/xguard/acct.uc flush >/dev/null 2>&1
 	killall xray 2>/dev/null
 	for p in $(pgrep -f 'ssh -N -D 127.0.0.1'); do kill $p 2>/dev/null; done
 	# stopping the service while enabled keeps the kill-switch (fail closed);

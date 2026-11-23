@@ -64,6 +64,8 @@ cat > "$CTRL/postinst" <<'EOF'
 . "${IPKG_INSTROOT}/lib/functions.sh"
 default_postinst "$0" "$@"
 ret=$?
+# older versions stopped at K99, which runs after the file systems are unmounted: drop that stale link
+rm -f "${IPKG_INSTROOT}/etc/rc.d/K99xguard"
 # rpcd loads its ucode plugins (our API) and ACL files at start
 [ -z "${IPKG_INSTROOT}" ] && {
 	/etc/init.d/rpcd restart >/dev/null 2>&1
