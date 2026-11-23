@@ -9,7 +9,8 @@ return view.extend({
 	handleReset: null,
 
 	render: function() {
-		var url = '/xguard/#sid=' + encodeURIComponent((L.env && L.env.sessionid) || '');
+		/* the unique query string keeps the browser from showing a cached (older) copy of the page */
+		var url = '/xguard/?v=' + Date.now() + '#sid=' + encodeURIComponent((L.env && L.env.sessionid) || '');
 
 		return E('div', { 'class': 'cbi-map' }, [
 			E('p', { 'style': 'margin:.4em 0' }, [

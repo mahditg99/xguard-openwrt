@@ -426,6 +426,13 @@ function collect_users(st, cfg) {
 		for (let q in quota_targets(cfg))
 			push(map, { idx: q.idx, key: q.key, name: q.name });
 	}
+	// a quota that was removed from the configuration disappears from the report too
+	let want = {};
+	for (let q in map)
+		want[q.key] = true;
+	for (let k in keys(st.users))
+		if (!want[k])
+			delete st.users[k];
 	for (let q in map) {
 		let u = st.users[q.key];
 		if (!u)

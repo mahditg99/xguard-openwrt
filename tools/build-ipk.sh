@@ -30,6 +30,8 @@ cp -r "$ROOT/files/." "$DATA/"
 # /www/index.html only exists for the stand-alone image (no LuCI); never overwrite a router's own index page
 rm -f "$DATA/www/index.html"
 echo "xguard $TAG (package)" > "$DATA/etc/xguard.version"
+# lets the web UI notice that the router now serves a newer page than the one cached in the browser
+sed -i "s/__BUILD__/$TAG/" "$DATA/www/xguard/index.html"
 
 find "$DATA" -type d -exec chmod 755 {} +
 find "$DATA" -type f -exec chmod 644 {} +

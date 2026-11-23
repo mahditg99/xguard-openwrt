@@ -224,6 +224,15 @@ eq "usage visible" "800,900" "$(q users/ip:192.168.5.60/w),$(q users/ip:192.168.
 XGUARD_NOW=$((t0+86400*3+40)) $A reset ip:192.168.5.60 >/dev/null 2>&1
 eq "manual reset zeroes the user" "0,0" "$(q users/ip:192.168.5.60/w),$(q users/ip:192.168.5.60/v)"
 
+# ---- 11. a quota removed from the configuration disappears --------------------------------------------
+printf "config main main
+	option enabled 1
+	list wan_if wan
+" > $SIM/conf/xguard
+rm -f $RUN/acct/map.json
+XGUARD_NOW=$((t0+86400*3+60)) $A harvest 2>/dev/null
+eq "removed quota user is gone" "" "$(q users/ip:192.168.5.60/w)"
+
 echo
 echo "passed=$pass failed=$fail"
 [ $fail = 0 ]

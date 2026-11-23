@@ -78,6 +78,8 @@ td .hint{margin:0}
 
 <script>
 'use strict';
+// replaced by the package build (tools/build-ipk.sh); stays as is in a checkout
+const BUILD = '__BUILD__';
 const $ = (s, e) => (e || document).querySelector(s);
 function h(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -674,6 +676,15 @@ $('#pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('#loginbtn'
 drawNav();
 (async () => { try { await load(); $('#login').style.display = 'none'; } catch (e) { showLogin(); } })();
 setInterval(refresh, 5000);
+// uhttpd sends no Cache-Control, so after an upgrade a browser can keep showing the old page for hours.
+// Compare with what the router serves now (revalidated) and reload once when it differs.
+(async () => {
+  try {
+    if (BUILD.startsWith('__')) return;
+    const m = /const BUILD = '([^']+)'/.exec(await (await fetch(location.pathname, { cache: 'no-cache' })).text());
+    if (m && m[1] !== BUILD && !sessionStorage.getItem('xg_reload_' + m[1])) { sessionStorage.setItem('xg_reload_' + m[1], '1'); location.reload(); }
+  } catch (e) { }
+})();
 </script>
 </body>
 </html>
