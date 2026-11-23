@@ -1,5 +1,15 @@
 # Changelog / تاریخچهٔ تغییرات
 
+## 1.1.1 — shutdown flush fix / رفع ذخیره‌نشدن آمار هنگام ریستارت
+
+**EN**
+- Fix: usage was not written to flash at reboot (only every `acct_save` seconds), so a reboot lost up to 10 minutes of numbers. Cause: the init script stopped at `STOP=99`, which procd runs after `K90umount` (file systems already unmounted). It now stops at `STOP=05` and flushes synchronously; the upgrade removes the stale `K99xguard` link. Verified on a real reboot (flush at shutdown, flash file updated).
+- Verified on hardware: xray is fetched automatically after every boot from an `ssh://` mirror (`list source 'ssh://xguard-mirror@HOST/xray.gz'`, forced-command key, `tools/mirror/setup-mirror.sh`) in about 25 s.
+
+**FA**
+- رفع باگ: آمار هنگام ریستارت روی فلش نوشته نمی‌شد (فقط هر `acct_save` ثانیه)، پس ریستارت تا ۱۰ دقیقه از اعداد را از بین می‌برد. علت: اسکریپت init با `STOP=99` متوقف می‌شد که procd بعد از `K90umount` (فایل‌سیستم‌ها قبلاً unmount شده‌اند) اجرا می‌کند. حالا با `STOP=05` و ذخیرهٔ همگام متوقف می‌شود؛ ارتقا لینک قدیمی `K99xguard` را پاک می‌کند. روی ریستارت واقعی تأیید شد.
+- روی سخت‌افزار تأیید شد: xray بعد از هر بوت خودکار از میرور `ssh://` (کلید با forced-command، `tools/mirror/setup-mirror.sh`) در حدود ۲۵ ثانیه گرفته می‌شود.
+
 ## 1.1.0 — usage report and daily quotas / گزارش مصرف و سهمیهٔ روزانه
 
 **EN**
