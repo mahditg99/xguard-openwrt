@@ -1,0 +1,32 @@
+#!/bin/sh
+# xguardacct - periodic accounting harvest (per-client / per-site traffic, daily quotas).
+#
+# Runs as its own procd instance so that an accounting problem can never stall the supervisor (xguardd) and with it
+# the kill-switch. Everything is done by ucode/acct.uc; callers serialise with a lock file.
+
+RUN=${XGUARD_RUN:-/tmp/xguard}
+LIB=${XGUARD_LIB:-/usr/lib/xguard}
+
+mkdir -p $RUN
+acct() { flock $RUN/acct.lock ucode "$LIB/acct.uc" "$@" 2>>$RUN/acct.err; }
+opt() { ucode "$LIB/gen.uc" get "$1" "$2" 2>/dev/null; }
+
+# shutdown / reboot: write today's numbers to flash
+bye() {
+	[ "$(opt enabled 0)" = 1 ] && acct flush
+	exit 0
+}
+trap bye TERM INT
+
+while :; do
+	if [ "$(opt enabled 0)" = 1 ] && [ "$(opt accounting 1)" = 1 ]; then
+		acct harvest
+		[ "$(wc -c < $RUN/acct.err 2>/dev/null || echo 0)" -gt 20000 ] && : > $RUN/acct.err
+	fi
+	iv=$(opt acct_interval 30)
+	case "$iv" in ''|*[!0-9]*) iv=30;; esac
+	[ "$iv" -lt 10 ] && iv=10
+	# `wait` returns as soon as a signal arrives (a plain sleep would delay the trap)
+	sleep "$iv" &
+	wait $!
+done

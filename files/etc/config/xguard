@@ -61,6 +61,14 @@ config main 'main'
 #	list cidr '203.0.113.0/24'         # IPv4/CIDR: never goes through the VPN (works even if xray is down)
 #	list cidr 'example.ir'             # domain (+sub-domains): routed 'direct' by xray; also full:host / keyword:word
 
+# config quota                          # daily allowance per user, whitelist (direct) and VPN counted separately
+#	option name 'ali'
+#	option ip '192.168.5.60'           # or: option mac
+#	option wl_mb '2048'                # whitelist MiB per day (0/empty = unlimited, count only)
+#	option wl_kbps '128'               # speed after it is used up (0 = cut off)
+#	option vpn_mb '512'
+#	option vpn_kbps '64'
+
 # config limit
 #	option name 'kid'
 #	option ip '192.168.5.60'           # or: option mac / option iface

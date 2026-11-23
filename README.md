@@ -18,6 +18,7 @@ It targets the **Xiaomi Mi Router 4A Gigabit** (MT7621, 128 MB RAM, 16 MB flash,
 - **Everything xray supports**: `vless://`, `vmess://`, `trojan://`, `ss://`, `socks://` links (TCP, WS, gRPC, HTTPUpgrade, XHTTP, mKCP, TLS, Reality, Vision) **plus raw xray outbound JSON** for anything else (WireGuard, Hysteria, `dialerProxy` chains, …).
 - **SSH tunnel** as an outbound (`ssh -D` → xray socks outbound). xray itself has no SSH support.
 - **Per-user speed limits** (IP, MAC or interface; download and upload separately; nftables policing).
+- **Usage report per client IP** (which sites/apps, how many bytes, whitelist vs VPN) and **daily quotas per user with two separate allowances** (whitelist traffic and VPN traffic): when one is used up, its speed drops to a number you choose; it resets every day and survives reboots.
 - **No DNS leaks**: dnsmasq resolves only through the tunnel.
 - **Built for 128 MB**: xray lives only in RAM (never on flash), zram swap, `GOMEMLIMIT`, RSS cap with automatic restart, bounded conntrack, no geoip/geosite, tiny rotating logs.
 - **Web UI** (Persian, RTL) at `http://<router>/xguard/`, and a CLI (`xguardctl`).

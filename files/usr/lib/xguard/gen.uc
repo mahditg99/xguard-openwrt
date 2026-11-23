@@ -2,7 +2,7 @@
 
 // CLI used by xguardd and the init script.
 //   gen.uc xray <node-id>     print xray config for that node
-//   gen.uc nft                print nftables ruleset (nothing if disabled)
+//   gen.uc nft [seed]         print nftables ruleset (nothing if disabled); "seed" restores today's quota usage
 //   gen.uc order              print enabled node ids, preferred first
 //   gen.uc nodeinfo <node-id> print: type|name|host|port|user|password|keyfile (for ssh nodes)
 //   gen.uc vars               read /debug/vars json on stdin, print: known alive delay up down
@@ -10,7 +10,8 @@
 //   gen.uc ifaces             print vpn interface names (for sysctl/ipv6 handling)
 //   gen.uc sources            print xray download sources, one per line
 
-import { load_config, ordered_nodes, node_by_id, gen_xray, gen_nft, gen_lockdown, parse_vars, bypass_split, local_dns } from './core.uc';
+import { load_config, ordered_nodes, node_by_id, gen_xray, gen_nft, gen_lockdown, parse_vars, bypass_split, local_dns, quota_targets } from './core.uc';
+import { seeds, write_map } from './acctlib.uc';
 import { stdin } from 'fs';
 
 function out(s) {
@@ -29,9 +30,15 @@ case 'xray': {
 	break;
 }
 case 'nft': {
-	let t = gen_nft(cfg);
-	if (t)
+	// "nft"      = the ruleset as the configuration alone defines it (used to detect changes)
+	// "nft seed" = the same, with today's usage of the quota users seeded into the counters/quotas (what gets loaded)
+	let seed = (ARGV[1] == 'seed');
+	let t = gen_nft(cfg, seed ? seeds() : null);
+	if (t) {
 		out(t);
+		if (seed)
+			write_map(quota_targets(cfg));
+	}
 	break;
 }
 case 'lockdown': {

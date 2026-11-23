@@ -96,7 +96,7 @@ function bypass_split(list) {
 function load_config() {
 	let dir = getenv('XGUARD_CONFDIR');	// test hook
 	let c = dir ? cursor(dir, dir + '/.save') : cursor();
-	let cfg = { main: {}, nodes: [], ifaces: [], devices: [], bypass: [], limits: [] };
+	let cfg = { main: {}, nodes: [], ifaces: [], devices: [], bypass: [], limits: [], quotas: [] };
 
 	c.foreach('xguard', 'main', (s) => { cfg.main = s; });
 	c.foreach('xguard', 'node', (s) => { if (s.enabled != '0') push(cfg.nodes, s); });
@@ -104,6 +104,7 @@ function load_config() {
 	c.foreach('xguard', 'device', (s) => { push(cfg.devices, s); });
 	c.foreach('xguard', 'bypass', (s) => { for (let x in arr(s.cidr)) push(cfg.bypass, x); });
 	c.foreach('xguard', 'limit', (s) => { push(cfg.limits, s); });
+	c.foreach('xguard', 'quota', (s) => { push(cfg.quotas, s); });
 
 	cfg.main.enabled = (mget(cfg.main, 'enabled', '0') == '1');
 	return cfg;
@@ -328,11 +329,122 @@ function lease_ips(mac) {
 	return ips;
 }
 
-function gen_nft(cfg) {
+// ---------------------------------------------------------- accounting + daily quotas
+//
+// Two traffic classes per client IP:
+//   w = "whitelist": everything that does NOT enter the tunnel (bypass IPs/domains exempted by nftables, direct
+//       devices/interfaces). Counted in the forward hook, between a LAN client and a WAN interface.
+//   v = "vpn": connections xguard redirected to xray. They carry ct mark 0x58xxxxxx (set in the redirect/tproxy rule)
+//       and are counted where they meet the router itself: input (client -> xray) and output (xray -> client).
+// Per-destination bytes live in dynamic nft sets (pair_*: client . remote, cli_*: client totals) that xguardd's
+// harvester reads every few seconds; quota users additionally get named counter/quota/limit objects, so that
+// "daily allowance used up -> slow down" is enforced inside the kernel, with no polling delay.
+
+function num(v) {
+	let n = int(v);
+	return (n == null || isnan(n) || n < 0) ? 0 : n;
+}
+
+// ceil(kbit/s / 8) as nft kbytes/second; 0 stays 0
+function kbytes_rate(kbps) {
+	let k = int(kbps / 8);
+	return (kbps > 0 && k < 1) ? 1 : k;
+}
+
+// -> [ { idx, key, name, ips, w_mb, w_kbps, v_mb, v_kbps } ]   (idx = 1.. is part of the nft object names)
+function quota_targets(cfg) {
+	let r = [];
+	for (let s in cfg.quotas) {
+		let key, ips;
+		if (s.ip && match(s.ip, RE_IP)) {
+			key = 'ip:' + s.ip;
+			ips = [ s.ip ];
+		} else if (s.mac && match(s.mac, RE_MAC)) {
+			key = 'mac:' + lc(s.mac);
+			ips = lease_ips(s.mac);
+		} else
+			continue;
+		push(r, {
+			idx: length(r) + 1, key: key, name: s.name || key, ips: ips,
+			w_mb: mint(s, 'wl_mb', 0), w_kbps: mint(s, 'wl_kbps', 64),
+			v_mb: mint(s, 'vpn_mb', 0), v_kbps: mint(s, 'vpn_kbps', 64)
+		});
+	}
+	return r;
+}
+
+function acct_parts(cfg, seeds) {
+	let qs = quota_targets(cfg);
+	let aset = (name, typ, size, tmo) =>
+		sprintf('\tset %s {\n\t\ttype %s\n\t\tflags dynamic\n\t\tsize %d\n\t\ttimeout %s\n\t\tcounter\n\t}\n', name, typ, size, tmo);
+	let sets = aset('pair_w', 'ipv4_addr . ipv4_addr', 4096, '5m') + aset('pair_v', 'ipv4_addr . ipv4_addr', 4096, '5m')
+		+ aset('cli_w', 'ipv4_addr', 1024, '1d') + aset('cli_v', 'ipv4_addr', 1024, '1d');
+	let objs = '', wf = '', vi = '', vo = '';
+	let users = (seeds && type(seeds.users) == 'object') ? seeds.users : {};
+
+	for (let q in qs) {
+		let sd = users[q.key] || {};
+		for (let c in [ 'w', 'v' ]) {
+			let mb = q[c + '_mb'];
+			let ks = kbytes_rate(q[c + '_kbps']);
+			let used = num(sd[c]);
+			objs += sprintf('\tcounter c%s%d { packets 0 bytes %d }\n', c, q.idx, used);
+			if (mb > 0) {
+				let qb = mb * 1048576;
+				objs += sprintf('\tquota q%s%d { over %d bytes used %d bytes }\n', c, q.idx, qb,
+					sd['t' + c] ? qb : (used < qb ? used : qb));
+				if (ks > 0)
+					for (let d in [ 'u', 'd' ])
+						objs += sprintf('\tlimit t%s%s%d { rate over %d kbytes/second burst %d kbytes }\n',
+							c, d, q.idx, ks, ks < 64 ? 32 : int(ks / 2));
+			}
+			for (let ip in q.ips) {
+				for (let d in [ 'u', 'd' ]) {
+					let mt;
+					if (c == 'w')
+						mt = (d == 'u') ? 'iifname != @wan_ifs oifname @wan_ifs ip saddr ' + ip : 'iifname @wan_ifs oifname != @wan_ifs ip daddr ' + ip;
+					else
+						mt = (d == 'u') ? 'ip saddr ' + ip : 'ip daddr ' + ip;
+					let r = '';
+					if (mb > 0)
+						r += sprintf('\t\t%s quota name "q%s%d"%s counter drop\n', mt, c, q.idx,
+							ks > 0 ? sprintf(' limit name "t%s%s%d"', c, d, q.idx) : '');
+					r += sprintf('\t\t%s counter name "c%s%d"\n', mt, c, q.idx);
+					if (c == 'w')
+						wf += r;
+					else if (d == 'u')
+						vi += r;
+					else
+						vo += r;
+				}
+			}
+		}
+	}
+
+	let ch = '\tchain acct_fwd {\n\t\ttype filter hook forward priority -5; policy accept;\n' + wf;
+	ch += '\t\tiifname != @wan_ifs oifname @wan_ifs update @pair_w { ip saddr . ip daddr }\n';
+	ch += '\t\tiifname != @wan_ifs oifname @wan_ifs update @cli_w { ip saddr }\n';
+	ch += '\t\tiifname @wan_ifs oifname != @wan_ifs update @pair_w { ip daddr . ip saddr }\n';
+	ch += '\t\tiifname @wan_ifs oifname != @wan_ifs update @cli_w { ip daddr }\n\t}\n';
+	ch += '\tchain acct_in {\n\t\ttype filter hook input priority -5; policy accept;\n';
+	ch += '\t\tct mark & 0xff000000 != 0x58000000 return\n\t\tct direction != original return\n' + vi;
+	ch += '\t\tupdate @pair_v { ip saddr . ct original ip daddr }\n\t\tupdate @cli_v { ip saddr }\n\t}\n';
+	ch += '\tchain acct_out {\n\t\ttype filter hook output priority -5; policy accept;\n';
+	ch += '\t\tct mark & 0xff000000 != 0x58000000 return\n\t\tct direction != reply return\n' + vo;
+	ch += '\t\tupdate @pair_v { ip daddr . ct original ip daddr }\n\t\tupdate @cli_v { ip daddr }\n\t}\n';
+	return { sets: sets, objs: objs, chains: ch, quotas: qs };
+}
+
+// seeds = { users: { "<key>": { w, v, tw, tv } } } restores today's usage after a reload/reboot; null = all zero
+function gen_nft(cfg, seeds) {
 	let m = cfg.main;
 
 	if (!cfg.main.enabled)
 		return null;
+	let acct_on = (mget(m, 'accounting', '1') == '1');
+	let ap = acct_on ? acct_parts(cfg, seeds) : null;
+	// VPN-class connections are tagged in the conntrack mark (high byte) so both directions can be told apart later
+	let ctm = acct_on ? ' ct mark set ct mark & 0x00ffffff | 0x58000000' : '';
 
 	let vpn_if = [], block_if = [], direct_if = [], direct_ip = [], direct_mac = [], vpn_ip = [], vpn_mac = [];
 	// global policy: 'direct' = nothing is proxied unless chosen (vpn interfaces / vpn devices);
@@ -411,6 +523,8 @@ function gen_nft(cfg) {
 		}
 	}
 	o += objs;
+	if (ap)
+		o += ap.sets + ap.objs;
 
 	let skip = '\t\tiifname @direct_ifs return\n\t\tip saddr @direct_ips return\n\t\tether saddr @direct_macs return\n';
 	let vpn_match = (dmode == 'vpn') ? [ 'iifname != @wan_ifs' ] : [
@@ -432,18 +546,20 @@ function gen_nft(cfg) {
 	o += '\tchain redir_tcp {\n\t\ttype nat hook prerouting priority -105; policy accept;\n' + skip;
 	o += noproxy + '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n\t\tip daddr @bypass_dyn return\n';
 	for (let v in vpn_match)
-		o += sprintf('\t\t%s meta l4proto tcp meta mark set %s redirect to :%d\n', v, MARK, rp);
+		o += sprintf('\t\t%s meta l4proto tcp meta mark set %s%s redirect to :%d\n', v, MARK, ctm, rp);
 	o += '\t}\n';
 
 	// UDP -> xray (tproxy)
 	o += '\tchain tproxy_udp {\n\t\ttype filter hook prerouting priority -150; policy accept;\n' + skip;
 	o += noproxy + '\t\tfib daddr type local return\n\t\tip daddr @bypass4 return\n\t\tip daddr @bypass_dyn return\n';
 	for (let v in vpn_match)
-		o += sprintf('\t\t%s meta nfproto ipv4 meta l4proto udp meta mark set %s tproxy ip to :%d accept\n', v, MARK, tp);
+		o += sprintf('\t\t%s meta nfproto ipv4 meta l4proto udp meta mark set %s%s tproxy ip to :%d accept\n', v, MARK, ctm, tp);
 	o += '\t}\n';
 
 	o += '\tchain lim_up {\n\t\ttype filter hook prerouting priority -160; policy accept;\n' + up_rules + '\t}\n';
 	o += '\tchain lim_down {\n\t\ttype filter hook postrouting priority 0; policy accept;\n' + down_rules + '\t}\n';
+	if (ap)
+		o += ap.chains;
 	o += '}\n';
 	return o;
 }
@@ -521,4 +637,4 @@ function parse_vars(txt) {
 	return r;
 }
 
-export { local_dns, classify_bypass, bypass_split, load_config, ordered_nodes, node_by_id, node_chain, gen_xray, gen_nft, gen_lockdown, parse_vars };
+export { local_dns, classify_bypass, bypass_split, load_config, ordered_nodes, node_by_id, node_chain, gen_xray, gen_nft, gen_lockdown, parse_vars, quota_targets, num };

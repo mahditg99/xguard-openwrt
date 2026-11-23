@@ -55,7 +55,9 @@ label.f{display:block;margin:.55rem 0 .2rem;color:var(--mut);font-size:.84rem}
 #login{position:fixed;inset:0;background:radial-gradient(circle at 50% 0%,color-mix(in srgb,var(--ac) 14%,var(--bg)),var(--bg) 60%);display:flex;align-items:center;justify-content:center;z-index:20}
 #login .card{padding:1.6rem 1.4rem}#login h1{font-size:1.3rem;margin-bottom:.3rem}
 pre{direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-all;font-size:.78rem;background:var(--bg);padding:.8rem;border-radius:10px;max-height:22rem;overflow:auto}
-.mono{direction:ltr;font-family:ui-monospace,Consolas,monospace;font-size:.85rem}
+.mono{direction:ltr;unicode-bidi:isolate;font-family:ui-monospace,Consolas,monospace;font-size:.85rem}
+.bar{height:6px;background:var(--bd);border-radius:9px;overflow:hidden;margin:.25rem 0;min-width:7rem}.bar>i{display:block;height:100%;background:var(--ac);border-radius:9px}.bar.hot>i{background:var(--warn)}.bar.over>i{background:var(--bad)}
+td .hint{margin:0}
 </style>
 </head>
 <body>
@@ -124,7 +126,7 @@ function say(t, bad) {
 
 // ---- state ----------------------------------------------------------------
 let cfg = null, st = null, dev = null, tab = 'status', dirty = false, editing = -1;
-const TABS = [['status', 'وضعیت'], ['nodes', 'نودها'], ['net', 'شبکه و دستگاه‌ها'], ['limits', 'محدودیت سرعت'], ['settings', 'تنظیمات'], ['logs', 'لاگ']];
+const TABS = [['status', 'وضعیت'], ['usage', 'مصرف'], ['nodes', 'نودها'], ['net', 'شبکه و دستگاه‌ها'], ['limits', 'محدودیت و سهمیه'], ['settings', 'تنظیمات'], ['logs', 'لاگ']];
 const fmt = n => { n = +n || 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + ' ' + u[i]; };
 const kb = n => fmt((+n || 0) * 1024);
 const dur = s => { s = +s || 0; const d = Math.floor(s / 86400), hh = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (hh ? hh + 'h ' : '') + m + 'm'; };
@@ -132,6 +134,7 @@ const STATUS_FA = { running: 'متصل', degraded: 'قطع (kill-switch فعال
 
 async function load() {
   [cfg, st, dev] = await Promise.all([xg('get_config'), xg('status'), xg('devices')]);
+  cfg.quotas = cfg.quotas || [];
   $('#enabled').checked = cfg.main.enabled === '1';
   editing = -1;
   paintHead(); render();
@@ -143,7 +146,7 @@ function paintHead() {
   $('#hnode').textContent = n ? n.name : '';
 }
 async function refresh() {
-  try { st = await xg('status'); paintHead(); if (tab === 'status') render(); if (tab === 'logs') loadLogs(); } catch (e) { }
+  try { st = await xg('status'); paintHead(); if (tab === 'status') render(); if (tab === 'logs') loadLogs(); if (tab === 'usage' && !uDay && U) loadUsage(); } catch (e) { }
 }
 
 async function save(okmsg) {
@@ -167,7 +170,7 @@ function drawNav() {
 }
 function render() {
   const m = $('#main'); m.innerHTML = '';
-  ({ status: vStatus, nodes: vNodes, net: vNet, limits: vLimits, settings: vSettings, logs: vLogs })[tab](m);
+  ({ status: vStatus, usage: vUsage, nodes: vNodes, net: vNet, limits: vLimits, settings: vSettings, logs: vLogs })[tab](m);
 }
 const saveBar = () => h('div', { class: 'row' }, h('button', { class: 'b', onclick: () => save() }, 'ذخیره و اعمال'));
 
@@ -469,6 +472,7 @@ function vLimits(m) {
     h('p', { class: 'hint' }, 'محدودیت برای هر دستگاه (IP/MAC) یا یک اینترفیس. ۰ یعنی نامحدود. پیاده‌سازی با nftables به‌صورت policing است: بسته‌های بیش از نرخ دور ریخته می‌شوند و TCP خودش سرعتش را پایین می‌آورد.'),
     cfg.limits.length ? t : null,
     h('div', { class: 'row' }, h('button', { class: 'b sec', onclick: () => { cfg.limits.push({ name: 'user' + (cfg.limits.length + 1), ip: '', mac: '', iface: '', down: '2000', up: '1000' }); render(); } }, 'افزودن محدودیت')), saveBar()));
+  m.append(quotaCard());
 }
 
 function vSettings(m) {
@@ -487,6 +491,176 @@ function vSettings(m) {
       h('label', {}, h('input', { type: 'checkbox', checked: M.block_quic !== '0', onchange: e => { M.block_quic = e.target.checked ? '1' : '0'; } }), ' بستن QUIC (UDP/443)')),
     h('label', { class: 'f' }, 'اینترفیس(های) WAN (ترافیک VPN‌ها به آن‌ها مسدود می‌شود)'),
     h('input', { class: 'ltr', style: 'width:100%', value: (M.wan_if || []).join(' '), onchange: e => { M.wan_if = e.target.value.split(/\s+/).filter(Boolean); } }), saveBar()));
+}
+
+// ---- usage report + daily quotas ----------------------------------------------------------------
+// A "site" is what the router counted (registrable domain from DNS, or a bare IP); the app names below are only
+// a display grouping done here in the browser.
+const APPS = [
+  ['YouTube', ['youtube.com', 'googlevideo.com', 'ytimg.com', 'youtu.be', 'youtube-nocookie.com']],
+  ['Instagram', ['instagram.com', 'cdninstagram.com']],
+  ['Facebook / Meta', ['facebook.com', 'fbcdn.net', 'fb.com', 'facebook.net', 'messenger.com', 'fbsbx.com', 'meta.com']],
+  ['WhatsApp', ['whatsapp.com', 'whatsapp.net', 'wa.me']],
+  ['Telegram', ['telegram.org', 't.me', 'telegram.me', 'telegra.ph', 'tdesktop.com', 'cdn-telegram.org', 'telesco.pe']],
+  ['Google', ['google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com', 'google-analytics.com', 'googletagmanager.com', 'doubleclick.net', 'googlesyndication.com', 'gvt1.com', 'gvt2.com', '1e100.net', 'ggpht.com', 'app-measurement.com', 'googleadservices.com', 'android.com', 'gmail.com', 'recaptcha.net', 'google.ir']],
+  ['Netflix', ['netflix.com', 'nflxvideo.net', 'nflximg.net', 'nflxext.com', 'nflxso.net']],
+  ['TikTok', ['tiktok.com', 'tiktokcdn.com', 'tiktokv.com', 'byteoversea.com', 'ibytedtos.com', 'musical.ly', 'muscdn.com']],
+  ['X / Twitter', ['twitter.com', 'x.com', 'twimg.com', 't.co']],
+  ['Apple', ['apple.com', 'icloud.com', 'mzstatic.com', 'apple-dns.net', 'cdn-apple.com', 'icloud-content.com']],
+  ['Microsoft', ['microsoft.com', 'windowsupdate.com', 'msftconnecttest.com', 'live.com', 'office.com', 'office365.com', 'bing.com', 'msedge.net', 'windows.com', 'microsoftonline.com', 'skype.com', 'xboxlive.com', 'azureedge.net', 'windows.net', 'msn.com', 'bing.net', 'trafficmanager.net']],
+  ['Amazon / AWS', ['amazon.com', 'amazonaws.com', 'cloudfront.net', 'media-amazon.com']],
+  ['Cloudflare', ['cloudflare.com', 'cloudflare-dns.com', 'cloudflareinsights.com', 'workers.dev']],
+  ['Spotify', ['spotify.com', 'scdn.co', 'spotifycdn.com']],
+  ['Discord', ['discord.com', 'discordapp.com', 'discord.gg', 'discord.media']],
+  ['Reddit', ['reddit.com', 'redd.it', 'redditstatic.com', 'redditmedia.com']],
+  ['GitHub', ['github.com', 'githubusercontent.com', 'github.io', 'githubassets.com']],
+  ['Wikipedia', ['wikipedia.org', 'wikimedia.org']],
+  ['Zoom', ['zoom.us', 'zoom.com']],
+  ['Steam', ['steampowered.com', 'steamstatic.com', 'steamcontent.com', 'steamserver.net']],
+  ['Epic Games', ['epicgames.com', 'unrealengine.com']],
+  ['Samsung', ['samsung.com', 'samsungapps.com', 'samsungcloudsolution.com', 'samsungosp.com', 'samsungqbe.com']],
+  ['Xiaomi', ['xiaomi.com', 'mi.com', 'miui.com', 'xiaomi.net', 'mi-img.com']],
+  ['Huawei', ['huawei.com', 'hicloud.com', 'dbankcloud.com', 'vmall.com']],
+  ['Firefox / Mozilla', ['mozilla.org', 'mozilla.com', 'mozilla.net', 'firefox.com']],
+  ['آپارات', ['aparat.com', 'aparat.cam']],
+  ['دیجی‌کالا', ['digikala.com', 'dgkala.com', 'digikala.ir']],
+  ['دیوار', ['divar.ir']],
+  ['اسنپ', ['snapp.ir', 'snappfood.ir', 'snapp.taxi']],
+  ['تپسی', ['tapsi.ir']],
+  ['روبیکا', ['rubika.ir', 'rubikaapp.ir']],
+  ['بله', ['bale.ai', 'ble.ir']],
+  ['ایتا', ['eitaa.com']],
+  ['شاد', ['shad.ir']],
+  ['نماوا', ['namava.ir']],
+  ['فیلیمو', ['filimo.com']],
+  ['تلوبیون', ['telewebion.com']],
+  ['کافه‌بازار', ['cafebazaar.ir', 'bazaar.ir']],
+  ['مایکت', ['myket.ir']],
+  ['ترب', ['torob.com']],
+  ['باسلام', ['basalam.com']]
+];
+const APPMAP = new Map();
+for (const [name, doms] of APPS) for (const d of doms) APPMAP.set(d, name);
+function appOf(site) {
+  let d = site;
+  while (d) { if (APPMAP.has(d)) return APPMAP.get(d); const i = d.indexOf('.'); if (i < 0) break; d = d.slice(i + 1); }
+  return null;
+}
+
+let U = null, uDay = '', uGroup = true, uOpen = new Set(), uAll = new Set();
+const leaseOf = ip => ((dev && dev.leases) || []).find(l => l.ip === ip);
+const jdate = d => {
+  try { return new Intl.DateTimeFormat('fa-IR-u-ca-persian', { dateStyle: 'full', timeZone: 'UTC' }).format(new Date(Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8), 12))); } catch (e) { return d; }
+};
+const hm = s => { s = Math.max(0, +s || 0); return Math.floor(s / 3600) + ':' + String(Math.floor(s % 3600 / 60)).padStart(2, '0'); };
+
+async function loadUsage() {
+  try { U = await xg('usage', uDay ? { day: uDay } : {}); if (tab === 'usage') drawUsage(); } catch (e) { if (tab === 'usage') say(e.message, true); }
+}
+function vUsage(m) { m.append(h('div', { id: 'ucard' }, h('div', { class: 'card hint' }, 'در حال خواندن…'))); if (U) drawUsage(); loadUsage(); }
+
+function quotaCell(u, c) {
+  const mb = u[c + '_mb'], used = u[c];
+  if (!mb) return h('div', { class: 'hint' }, h('bdi', {}, fmt(used)), ' (بدون سقف)');
+  const cap = mb * 1048576, pct = Math.min(100, used / cap * 100), thr = u['t' + c];
+  return h('div', {},
+    h('div', { class: 'mono' }, fmt(used) + ' / ' + fmt(cap)),
+    h('div', { class: 'bar ' + (thr ? 'over' : pct > 80 ? 'hot' : '') }, h('i', { style: 'width:' + pct.toFixed(1) + '%' })),
+    thr ? h('div', { class: 'hint', style: 'color:var(--bad)' }, 'سقف تمام شد — ', u[c + '_kbps'] > 0 ? ['سرعت ', h('bdi', {}, u[c + '_kbps'] + ' kbit/s')] : 'قطع کامل') : null);
+}
+
+function siteTable(ip, c) {
+  const rows = new Map();
+  for (const [site, [w, v]] of Object.entries(c.s || {})) {
+    const app = uGroup ? appOf(site) : null;
+    const key = app || (site === '~other' ? 'سایر (کم‌حجم)' : site);
+    const r = rows.get(key) || { name: key, app: !!app, w: 0, v: 0, n: 0 };
+    r.w += w; r.v += v; r.n++; rows.set(key, r);
+  }
+  const attributed = [...rows.values()].reduce((a, r) => a + r.w + r.v, 0);
+  const lost = (c.w + c.v) - attributed;
+  if (lost > 1024) rows.set('~', { name: 'بدون تفکیک', w: 0, v: 0, n: 0, lost });
+  const arr = [...rows.values()].sort((a, b) => (b.w + b.v + (b.lost || 0)) - (a.w + a.v + (a.lost || 0)));
+  const all = uAll.has(ip), shown = all ? arr : arr.slice(0, 25);
+  const t = h('table', {}, h('thead', {}, h('tr', {}, ['سایت / برنامه', 'لیست سفید', 'VPN', 'مجموع'].map(x => h('th', {}, x)))),
+    h('tbody', {}, shown.map(r => h('tr', {},
+      h('td', { class: 'mono' }, r.name, r.app && r.n > 1 ? h('span', { class: 'hint' }, ' (' + r.n + ' سایت)') : null),
+      h('td', { class: 'mono' }, r.lost ? '' : fmt(r.w)), h('td', { class: 'mono' }, r.lost ? '' : fmt(r.v)),
+      h('td', { class: 'mono' }, fmt(r.w + r.v + (r.lost || 0)))))));
+  return h('div', {}, t, arr.length > 25 ? h('button', { class: 'b sec', onclick: () => { all ? uAll.delete(ip) : uAll.add(ip); drawUsage(); } }, all ? 'نمایش کمتر' : 'نمایش همه (' + arr.length + ')') : null);
+}
+
+function drawUsage() {
+  const box = $('#ucard'); if (!box || !U) return;
+  box.innerHTML = '';
+  if (U.error) { box.append(h('div', { class: 'card' }, U.error)); return; }
+  const live = !uDay || uDay === U.today;
+  // header
+  const days = [...new Set([U.today, ...U.days])].sort().reverse();
+  box.append(h('div', { class: 'card' },
+    h('div', { class: 'row' },
+      h('b', {}, jdate(U.day)),
+      h('select', { onchange: e => { uDay = e.target.value === U.today ? '' : e.target.value; U = null; loadUsage(); } },
+        days.map(d => h('option', { value: d, selected: d === U.day }, d === U.today ? 'امروز' : d))),
+      h('label', {}, h('input', { type: 'checkbox', checked: uGroup, onchange: e => { uGroup = e.target.checked; drawUsage(); } }), ' گروه‌بندی بر اساس برنامه'),
+      h('span', { style: 'flex:1' }),
+      h('button', { class: 'b sec', onclick: loadUsage }, 'تازه‌سازی'),
+      h('button', { class: 'b del', onclick: async () => { if (confirm('همهٔ گزارش‌های ذخیره‌شده پاک شود؟ (حجم مصرفی سهمیه‌ها دست‌نخورده می‌ماند)')) { await xg('usage_clear'); say('گزارش‌ها پاک شد'); loadUsage(); } } }, 'پاک کردن گزارش‌ها')),
+    h('p', { class: 'hint' }, live ? 'ریست بعدی سهمیه‌ها: ' + hm(U.next_reset - U.time) + ' ساعت دیگر · ' : '', 'ساعت محلی روتر = ', h('bdi', {}, 'UTC' + (U.tz_offset >= 0 ? '+' : '-') + hm(Math.abs(U.tz_offset) * 60)), ' · ریست هر روز ساعت ', h('bdi', {}, U.reset_time), ' · «لیست سفید» = ترافیکی که وارد تونل نمی‌شود (مستقیم)، «VPN» = ترافیک تونل. نام سایت‌ها از DNS روتر می‌آید؛ دستگاهی که DNS دیگری (DoH/DoT) دارد به‌صورت IP دیده می‌شود.'),
+    !U.accounting ? h('p', { style: 'color:var(--warn)' }, 'شمارش غیرفعال است (xguard خاموش است یا گزینهٔ شمارش در تب «محدودیت و سهمیه» خاموش شده).') : null));
+
+  // rows: every client seen + every quota user
+  const rows = [];
+  const seen = new Set();
+  for (const [ip, c] of Object.entries(U.clients)) { rows.push({ ip, c, u: userFor(ip) }); seen.add(ip); }
+  for (const u of U.users) {
+    const ip = u.key.startsWith('ip:') ? u.key.slice(3) : (((dev.leases || []).find(l => 'mac:' + l.mac.toLowerCase() === u.key) || {}).ip);
+    if (!ip || !seen.has(ip)) rows.push({ ip: ip || u.key, c: { w: u.w, v: u.v, s: {} }, u });
+  }
+  rows.sort((a, b) => (b.c.w + b.c.v) - (a.c.w + a.c.v));
+  const tw = rows.reduce((a, r) => a + r.c.w, 0), tv = rows.reduce((a, r) => a + r.c.v, 0);
+  const t = h('table', {}, h('thead', {}, h('tr', {}, ['دستگاه', 'لیست سفید', 'VPN', 'مجموع', ''].map(x => h('th', {}, x)))));
+  const tb = h('tbody'); t.append(tb);
+  for (const r of rows) {
+    const l = leaseOf(r.ip), open = uOpen.has(r.ip);
+    const wcell = r.u ? quotaCell(r.u, 'w') : h('span', { class: 'mono' }, fmt(r.c.w));
+    const vcell = r.u ? quotaCell(r.u, 'v') : h('span', { class: 'mono' }, fmt(r.c.v));
+    tb.append(h('tr', { style: 'cursor:pointer', onclick: () => { open ? uOpen.delete(r.ip) : uOpen.add(r.ip); drawUsage(); } },
+      h('td', {}, h('div', {}, (open ? '▾ ' : '▸ ') + ((r.u && r.u.name) || (l && l.name && l.name !== '*' ? l.name : r.ip))), h('div', { class: 'hint mono' }, r.ip)),
+      h('td', {}, wcell), h('td', {}, vcell), h('td', { class: 'mono' }, fmt(r.c.w + r.c.v)),
+      h('td', {}, r.u && live ? h('button', { class: 'b sec', onclick: async ev => { ev.stopPropagation(); if (confirm('مصرف امروز این کاربر صفر شود؟')) { await xg('usage_reset', { key: r.u.key }); say('ریست شد'); loadUsage(); } } }, 'ریست') : null)));
+    if (open) tb.append(h('tr', {}, h('td', { colspan: 5, style: 'background:var(--bg)' }, Object.keys(r.c.s || {}).length ? siteTable(r.ip, r.c) : h('span', { class: 'hint' }, 'ریز مصرف سایت‌ها برای این روز موجود نیست.'))));
+  }
+  tb.append(h('tr', {}, h('td', {}, h('b', {}, 'مجموع')), h('td', { class: 'mono' }, fmt(tw)), h('td', { class: 'mono' }, fmt(tv)), h('td', { class: 'mono' }, fmt(tw + tv)), h('td')));
+  box.append(h('div', { class: 'card' }, rows.length ? t : h('p', { class: 'hint' }, 'هنوز مصرفی ثبت نشده است. (شمارش با روشن بودن xguard شروع می‌شود و هر ۳۰ ثانیه به‌روز می‌شود.)')));
+}
+function userFor(ip) {
+  const l = leaseOf(ip);
+  return U.users.find(u => u.key === 'ip:' + ip || (l && u.key === 'mac:' + l.mac.toLowerCase()));
+}
+
+// daily allowance editor (tab "limits")
+function quotaCard() {
+  cfg.quotas = cfg.quotas || [];
+  const M = cfg.main;
+  const inp = (q, k, w, ph) => h('input', { class: 'ltr', type: 'number', min: 0, style: 'width:' + w, placeholder: ph || '0', value: q[k] || '', onchange: e => { q[k] = e.target.value; } });
+  const dl = h('datalist', { id: 'leaselist' }, (dev.leases || []).flatMap(l => [h('option', { value: l.ip }, l.name), h('option', { value: l.mac }, l.name)]));
+  const t = h('table', {}, h('thead', {}, h('tr', {}, ['نام', 'دستگاه (IP یا MAC)', 'لیست سفید: حجم روزانه (MB)', 'پس از سقف (kbit/s)', 'VPN: حجم روزانه (MB)', 'پس از سقف (kbit/s)', ''].map(x => h('th', {}, x)))));
+  const tb = h('tbody'); t.append(tb);
+  cfg.quotas.forEach((q, i) => tb.append(h('tr', {},
+    h('td', {}, h('input', { value: q.name, style: 'width:6rem', onchange: e => { q.name = e.target.value; } })),
+    h('td', {}, h('input', { class: 'ltr', list: 'leaselist', style: 'width:11rem', value: q.ip || q.mac || '', onchange: e => { const v = e.target.value.trim(); if (v.includes(':')) { q.mac = v; q.ip = ''; } else { q.ip = v; q.mac = ''; } } })),
+    h('td', {}, inp(q, 'wl_mb', '7rem')), h('td', {}, inp(q, 'wl_kbps', '6rem', '64')),
+    h('td', {}, inp(q, 'vpn_mb', '7rem')), h('td', {}, inp(q, 'vpn_kbps', '6rem', '64')),
+    h('td', {}, h('button', { class: 'b del', onclick: () => { cfg.quotas.splice(i, 1); render(); } }, 'حذف')))));
+  const fld = (label, key, def, extra) => h('div', {}, h('label', { class: 'f' }, label), h('input', Object.assign({ class: 'ltr', style: 'width:100%', value: M[key] || def, onchange: e => { M[key] = e.target.value; } }, extra || {})));
+  return h('div', { class: 'card' }, h('b', {}, 'سهمیهٔ روزانه برای هر کاربر (دو سقف جدا: لیست سفید و VPN)'),
+    h('p', { class: 'hint' }, 'هر کاربر دو شمارندهٔ روزانهٔ جدا دارد: «لیست سفید» = ترافیک مستقیم که وارد تونل نمی‌شود (مقصدهای لیست استثنا، دستگاه/اینترفیس مستقیم) و «VPN» = ترافیکی که از تونل می‌گذرد. وقتی مصرف یک شمارنده به سقفش برسد، فقط سرعت همان بخش به عدد «پس از سقف» کاهش می‌یابد (۰ = قطع کامل). حجم ۰ یا خالی = بدون سقف (فقط شمارش). هر ۲۴ ساعت (طبق ساعت ریست زیر) صفر می‌شود. مصرف هر چند دقیقه روی حافظهٔ فلش ذخیره می‌شود و با ریستارت روتر پاک نمی‌شود (در قطع ناگهانی برق حداکثر چند دقیقهٔ آخر از دست می‌رود). ۱ گیگابایت = ۱۰۲۴ مگابایت.'),
+    dl, cfg.quotas.length ? t : h('p', { class: 'hint' }, 'هنوز سهمیه‌ای تعریف نشده است.'),
+    h('div', { class: 'row' }, h('button', { class: 'b sec', onclick: () => { cfg.quotas.push({ name: 'user' + (cfg.quotas.length + 1), ip: '', mac: '', wl_mb: '1024', wl_kbps: '128', vpn_mb: '512', vpn_kbps: '64' }); render(); } }, 'افزودن کاربر')),
+    h('div', { class: 'grid' }, fld('ساعت ریست روزانه (HH:MM)', 'reset_time', '00:00', { placeholder: '00:00' }), fld('اختلاف ساعت محلی با UTC (دقیقه؛ تهران ۲۱۰)', 'tz_offset', '210'), fld('نگهداری گزارش (روز)', 'acct_days', '7')),
+    h('div', { class: 'row' }, h('label', {}, h('input', { type: 'checkbox', checked: M.accounting !== '0', onchange: e => { M.accounting = e.target.checked ? '1' : '0'; } }), ' شمارش مصرف و گزارش (لاگ DNS در RAM نگه داشته می‌شود)')),
+    saveBar());
 }
 
 async function loadLogs() { const l = await xg('logs'); const p = $('#logs'); if (p) p.textContent = `--- xguardd\n${l.xguardd}\n\n--- xray\n${l.xray}\n\n--- ssh\n${l.ssh}`; }

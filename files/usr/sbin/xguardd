@@ -14,10 +14,13 @@ XRAY=$RUN/xray
 CONF=${XGUARD_CONF:-/etc/config/xguard}
 ETC=${XGUARD_ETC:-/etc/xguard}
 DNSBAK=$ETC/dnsmasq.orig
+DNSLOGBAK=$ETC/dnslog.orig
 DNSMASQ_INIT=${XGUARD_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
 MARK=0x58000000/0xff000000
 
 gen() { ucode "$LIB/gen.uc" "$@"; }
+# accounting helper; serialised with the periodic harvest (xguardacct) by a lock file
+acct() { flock $RUN/acct.lock ucode "$LIB/acct.uc" "$@" 2>>$RUN/acct.err; }
 
 log() {
 	logger -t xguardd "$*"
@@ -46,8 +49,23 @@ apply_guard() {
 		rm -f $new
 		return 0
 	fi
-	if nft -f $new 2>$RUN/nft.err; then
+	# $new is the ruleset as the configuration defines it (used only to detect changes). The one that gets loaded also
+	# carries today's usage of the quota users, and the counters of the table being replaced are banked first.
+	local seeded=$RUN/guard.nft.seed
+	nft list table inet xguard >/dev/null 2>&1 && acct harvest
+	if ! gen nft seed > $seeded 2>>$RUN/gen.err || [ ! -s $seeded ]; then
+		cp $new $seeded
+	fi
+	if nft -f $seeded 2>$RUN/nft.err; then
 		mv $new $RUN/guard.nft
+		rm -f $RUN/acct/prev.tsv
+		return 0
+	fi
+	# the seeded variant must not be the reason for losing the kill-switch: retry with the plain one
+	if nft -f $new 2>$RUN/nft.err; then
+		log "seeded ruleset rejected by nft, loaded without accounting seeds ($(head -c 120 $RUN/nft.err))"
+		mv $new $RUN/guard.nft
+		rm -f $RUN/acct/prev.tsv
 		return 0
 	fi
 	log "full ruleset rejected by nft ($(head -c 200 $RUN/nft.err)); falling back to lockdown (kill-switch only)"
@@ -112,9 +130,31 @@ dns_hook() {
 			changed=1
 		fi
 	fi
+	dns_log "$1"
 	if [ $changed = 1 ]; then
 		uci -q commit dhcp
 		pidof dnsmasq >/dev/null 2>&1 && $DNSMASQ_INIT reload >/dev/null 2>&1
+	fi
+}
+
+# dnsmasq's query log (RAM only) lets the accounting name the sites behind remote IPs. Original values are restored
+# when xguard or accounting is switched off. Sets `changed` of dns_hook (dynamic scope).
+dns_log() {
+	local f=$DNSLOGBAK k v
+	if [ "$1" = on ] && [ "$(opt accounting 1)" = 1 ]; then
+		if [ "$(uci -q get dhcp.@dnsmasq[0].logqueries)" != 1 ] || [ "$(uci -q get dhcp.@dnsmasq[0].logfacility)" != "$RUN/dns.log" ]; then
+			[ -f $f ] || { echo "logqueries=$(uci -q get dhcp.@dnsmasq[0].logqueries)"; echo "logfacility=$(uci -q get dhcp.@dnsmasq[0].logfacility)"; } > $f
+			uci -q set dhcp.@dnsmasq[0].logqueries=1
+			uci -q set dhcp.@dnsmasq[0].logfacility="$RUN/dns.log"
+			changed=1
+		fi
+	elif [ -f $f ]; then
+		for k in logqueries logfacility; do
+			v=$(sed -n "s/^$k=//p" $f)
+			if [ -n "$v" ]; then uci -q set dhcp.@dnsmasq[0].$k="$v"; else uci -q delete dhcp.@dnsmasq[0].$k; fi
+		done
+		rm -f $f
+		changed=1
 	fi
 }
 
@@ -124,6 +164,7 @@ if [ "$1" = guard ]; then
 	exit 0
 fi
 if [ "$1" = unguard ]; then
+	nft list table inet xguard >/dev/null 2>&1 && acct flush
 	nft delete table inet xguard 2>/dev/null
 	teardown_routing
 	dns_hook off

@@ -7,6 +7,7 @@ import { cursor } from 'uci';
 import { readfile, writefile, lsdir, stat, popen } from 'fs';
 import { parse_link } from '/usr/lib/xguard/links.uc';
 import { load_config, classify_bypass } from '/usr/lib/xguard/core.uc';
+import { report } from '/usr/lib/xguard/acctlib.uc';
 
 const RUN = '/tmp/xguard';
 
@@ -16,8 +17,10 @@ function cur() {
 }
 const MAIN_KEYS = [
 	'enabled', 'node', 'log_level', 'dns_remote', 'probe_url', 'probe_interval', 'fail_threshold',
-	'mem_limit', 'rss_kill', 'sniffing', 'block_quic', 'dns_bypass', 'default_mode'
+	'mem_limit', 'rss_kill', 'sniffing', 'block_quic', 'dns_bypass', 'default_mode',
+	'accounting', 'reset_time', 'tz_offset', 'acct_days'
 ];
+const QUOTA_KEYS = [ 'name', 'ip', 'mac', 'wl_mb', 'wl_kbps', 'vpn_mb', 'vpn_kbps' ];
 const MAIN_LISTS = [ 'source', 'wan_if' ];
 const NODE_TYPES = [ 'link', 'json', 'ssh' ];
 const IFACE_MODES = [ 'vpn', 'direct', 'block' ];
@@ -85,7 +88,7 @@ function status() {
 
 function get_config() {
 	let c = cur();
-	let out = { main: {}, nodes: [], ifaces: [], devices: [], bypass: [], limits: [] };
+	let out = { main: {}, nodes: [], ifaces: [], devices: [], bypass: [], limits: [], quotas: [] };
 	c.foreach('xguard', 'main', (s) => {
 		for (let k in MAIN_KEYS)
 			if (s[k] != null)
@@ -108,6 +111,12 @@ function get_config() {
 	});
 	c.foreach('xguard', 'limit', (s) => {
 		push(out.limits, { name: s.name || '', ip: s.ip || '', mac: s.mac || '', iface: s.iface || '', down: s.down || '0', up: s.up || '0' });
+	});
+	c.foreach('xguard', 'quota', (s) => {
+		let q = {};
+		for (let k in QUOTA_KEYS)
+			q[k] = s[k] || '';
+		push(out.quotas, q);
 	});
 	return out;
 }
@@ -157,6 +166,17 @@ function save_config(req) {
 		for (let b in (d.bypass || []))
 			if (!classify_bypass(b))
 				die('bad bypass entry: ' + b + ' (IPv4/CIDR or a domain such as example.com)');
+		for (let q in (d.quotas || [])) {
+			if (!match(q.mac || '', /^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/) && !match(q.ip || '', /^[0-9]{1,3}(\.[0-9]{1,3}){3}(\/[0-9]{1,2})?$/))
+				die('quota "' + (q.name || '?') + '" needs a valid IP or MAC');
+			for (let k in [ 'wl_mb', 'wl_kbps', 'vpn_mb', 'vpn_kbps' ])
+				if (q[k] != null && q[k] !== '' && !match('' + q[k], /^[0-9]{1,9}$/))
+					die('quota "' + (q.name || '?') + '": ' + k + ' must be a whole number (0 = unlimited / cut off)');
+		}
+		if (d.main && d.main.reset_time != null && d.main.reset_time !== '' && !match('' + d.main.reset_time, /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/))
+			die('reset_time must look like 00:00');
+		if (d.main && d.main.tz_offset != null && d.main.tz_offset !== '' && !match('' + d.main.tz_offset, /^-?[0-9]{1,3}$/))
+			die('tz_offset is minutes from UTC, e.g. 210 for Tehran');
 		if (d.main && d.main.default_mode && !(d.main.default_mode in [ 'vpn', 'direct' ]))
 			die('default_mode must be vpn or direct');
 		if (d.main && d.main.dns_bypass && !match(trim('' + d.main.dns_bypass), /^[A-Za-z0-9.:\/_-]+$/))
@@ -231,6 +251,22 @@ function save_config(req) {
 						c.set('xguard', id, k, '' + l[k]);
 			}
 		}
+		if (d.quotas != null) {
+			clean_sections(c, 'quota');
+			for (let q in d.quotas) {
+				let id = c.add('xguard', 'quota');
+				for (let k in QUOTA_KEYS) {
+					if (q[k] == null || q[k] === '')
+						continue;
+					if (k == 'mac')
+						c.set('xguard', id, k, lc('' + q[k]));
+					else if (k == 'ip' && q.mac)
+						continue;
+					else
+						c.set('xguard', id, k, '' + q[k]);
+				}
+			}
+		}
 		c.save('xguard');
 		c.commit('xguard');
 	} catch (e) {
@@ -296,6 +332,32 @@ const methods = {
 			} catch (e) {
 				return { error: '' + e };
 			}
+		}
+	},
+	// per-client / per-site traffic of today (or of a stored day), quota usage
+	usage: {
+		args: { day: '' },
+		call: function(req) {
+			let day = req.args.day;
+			return report((day && match(day, /^[0-9]{8}$/)) ? day : null);
+		}
+	},
+	// zero the daily usage of one quota user ("ip:1.2.3.4", "mac:aa:..") or of everybody ("all")
+	usage_reset: {
+		args: { key: 'all' },
+		call: function(req) {
+			let key = req.args.key || 'all';
+			if (key != 'all' && !match(key, /^(ip|mac):[0-9a-fA-F.:\/]+$/))
+				return { error: 'bad key' };
+			system("flock /tmp/xguard/acct.lock ucode /usr/lib/xguard/acct.uc reset '" + key + "' >/dev/null 2>&1", 20000);
+			return { ok: true };
+		}
+	},
+	// forget the stored reports (quota usage stays)
+	usage_clear: {
+		call: function() {
+			system('flock /tmp/xguard/acct.lock ucode /usr/lib/xguard/acct.uc clear >/dev/null 2>&1', 20000);
+			return { ok: true };
 		}
 	},
 	logs: {

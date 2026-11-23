@@ -59,13 +59,24 @@ push-xray)
 	rm -f $RUN/hold
 	echo "xray installed in RAM: $($RUN/xray version | head -n1)"
 	;;
+usage)
+	# today's (or <YYYYMMDD>'s) traffic per client and site, and the quota users: JSON
+	ucode $LIB/acct.uc report $2
+	;;
+usage-reset)
+	# usage-reset [ip:1.2.3.4 | mac:aa:bb:..]   zero the daily usage of one quota user (default: all)
+	flock $RUN/acct.lock ucode $LIB/acct.uc reset "${2:-all}"
+	;;
+usage-clear)
+	flock $RUN/acct.lock ucode $LIB/acct.uc clear && echo "reports cleared"
+	;;
 test-config)
 	# check the generated xray config of a node with xray itself
 	[ -x $RUN/xray ] || { echo "no xray in RAM"; exit 1; }
 	ucode $LIB/gen.uc xray "$2" > $RUN/config.test.json && $RUN/xray run -test -c $RUN/config.test.json
 	;;
 *)
-	echo "usage: xguardctl status|logs|restart|next|update-xray|enable|disable|genkey|push-xray [sha256]|test-config <node>"
+	echo "usage: xguardctl status|logs|restart|next|update-xray|enable|disable|genkey|push-xray [sha256]|test-config <node>|usage [day]|usage-reset [key]|usage-clear"
 	exit 1
 	;;
 esac

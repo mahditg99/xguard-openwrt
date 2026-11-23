@@ -18,6 +18,7 @@ xguard یک جایگزین سبک برای passwall روی روترهای کوچ
 - **هر چیزی که xray پشتیبانی می‌کند:** لینک‌های `vless://`، `vmess://`، `trojan://`، `ss://`، `socks://` (TCP، WS، gRPC، HTTPUpgrade، XHTTP، mKCP، TLS، Reality، Vision) **و JSON خام outbound** برای بقیه (WireGuard، Hysteria، زنجیرهٔ `dialerProxy`، …).
 - **SSH tunnel** به‌صورت outbound (`ssh -D` ← outbound از نوع socks در xray). خود xray SSH ندارد.
 - **محدودیت سرعت** برای هر دستگاه (IP، MAC یا اینترفیس؛ دانلود و آپلود جدا؛ policing با nftables).
+- **گزارش مصرف به‌ازای IP** (به کدام سایت/برنامه رفته و چقدر؛ لیست سفید جدا از VPN) و **سهمیهٔ روزانه برای هر کاربر با دو سقف جدا** (ترافیک لیست سفید و ترافیک VPN): وقتی یکی تمام شود سرعت همان بخش به عددی که تعیین کرده‌اید کم می‌شود؛ هر روز ریست می‌شود و با ریستارت روتر پاک نمی‌شود.
 - **بدون نشت DNS:** dnsmasq فقط از داخل تونل resolve می‌کند.
 - **ساخته‌شده برای ۱۲۸ مگابایت:** xray فقط در RAM (هرگز روی فلش)، zram swap، `GOMEMLIMIT`، سقف RSS با ری‌استارت خودکار، conntrack محدود، بدون geoip/geosite، لاگ‌های چرخشی کوچک.
 - **صفحهٔ وب** (فارسی، راست‌به‌چپ) در `http://<router>/xguard/` و CLI به نام `xguardctl`.

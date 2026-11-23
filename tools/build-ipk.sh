@@ -34,7 +34,7 @@ echo "xguard $TAG (package)" > "$DATA/etc/xguard.version"
 find "$DATA" -type d -exec chmod 755 {} +
 find "$DATA" -type f -exec chmod 644 {} +
 chmod 755 "$DATA/etc/init.d/xguard" "$DATA/etc/uci-defaults/90-xguard" "$DATA/usr/sbin/xguardd" \
-          "$DATA/usr/sbin/xguardctl" "$DATA/usr/libexec/xguard/fetch"
+          "$DATA/usr/sbin/xguardctl" "$DATA/usr/sbin/xguardacct" "$DATA/usr/libexec/xguard/fetch"
 chmod 600 "$DATA/etc/config/xguard"
 
 SIZE="$(du -sb "$DATA" | cut -f1)"

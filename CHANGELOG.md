@@ -1,5 +1,25 @@
 # Changelog / تاریخچهٔ تغییرات
 
+## 1.1.0 — usage report and daily quotas / گزارش مصرف و سهمیهٔ روزانه
+
+**EN**
+- **Usage report** (web UI tab *Usage*, `xguardctl usage`): per client IP, bytes in two classes — *whitelist* (traffic that does not enter the tunnel) and *VPN* — and per site / app. Sites are named from dnsmasq's query log (RAM only); the web UI groups them into apps.
+- **Daily quotas** (`config quota`, tab *Limits and quotas*): every user gets two separate allowances (whitelist and VPN). When one is used up, only that class is slowed down to a speed you choose (or cut off with `0`). Enforced in the kernel with nftables `quota` + `limit` objects. Resets daily at `reset_time` (default 00:00, Tehran time via `tz_offset`), manual reset per user.
+- Usage is written to flash (gzip, a few KB per day, every `acct_save` = 600 s and at shutdown) and re-seeded into the ruleset at boot, so a **reboot does not lose the numbers**. A clock that is behind the last saved time never starts a new day (no RTC).
+- New `xguardacct` procd instance does the periodic harvest, separate from the supervisor so it can never stall the kill-switch. New `acctlib.uc` / `acct.uc`; the ruleset gains the sets `pair_w/pair_v/cli_w/cli_v`, the chains `acct_fwd/acct_in/acct_out` and a conntrack mark on VPN connections.
+- `xguardd` enables dnsmasq's `logqueries` (log in `/tmp/xguard/dns.log`, ≤ 256 KB) while accounting is on and restores your own settings when it is off.
+- Tests: `tests/test-acct.sh` (31 checks: parsers, deltas, persistence, rollover, retention, reset); also verified live on a Xiaomi 4A with real traffic in an isolated copy of the ruleset (per-site counting through REDIRECT, whitelist counting, throttle to the configured speed).
+- Known: IPv4 only; firewall flow offloading must stay off; accounting runs only while xguard is enabled.
+
+**FA**
+- **گزارش مصرف** (تب *مصرف* در صفحهٔ وب، `xguardctl usage`): برای هر IP بایت‌ها در دو دسته — *لیست سفید* (ترافیکی که وارد تونل نمی‌شود) و *VPN* — و به‌تفکیک سایت / برنامه. نام سایت‌ها از لاگ پرسمان dnsmasq (فقط RAM) می‌آید و صفحهٔ وب آن‌ها را در برنامه‌ها گروه می‌کند.
+- **سهمیهٔ روزانه** (`config quota`، تب *محدودیت و سهمیه*): هر کاربر دو سقف جدا دارد (لیست سفید و VPN). وقتی یکی تمام شود فقط سرعت همان بخش به عددی که تعیین کرده‌اید کم می‌شود (یا با `0` قطع). اعمال آن در کرنل با اشیای `quota` و `limit` در nftables است. هر روز در `reset_time` ریست می‌شود (پیش‌فرض ۰۰:۰۰ به وقت تهران با `tz_offset`) و ریست دستی برای هر کاربر هست.
+- مصرف روی فلش نوشته می‌شود (gzip، چند کیلوبایت در روز، هر `acct_save` = ۶۰۰ ثانیه و هنگام خاموشی) و هنگام بوت دوباره داخل ruleset ریخته می‌شود؛ پس **ریستارت روتر آمار را پاک نمی‌کند**. ساعتی که از آخرین زمان ذخیره عقب‌تر باشد هرگز روز جدید شروع نمی‌کند (RTC نداریم).
+- یک instance جدید procd به نام `xguardacct` خواندن دوره‌ای را انجام می‌دهد؛ جدا از ناظر است تا هرگز kill-switch را متوقف نکند. فایل‌های جدید `acctlib.uc` / `acct.uc`؛ ruleset مجموعه‌های `pair_w/pair_v/cli_w/cli_v`، زنجیره‌های `acct_fwd/acct_in/acct_out` و یک mark در conntrack برای اتصال‌های VPN می‌گیرد.
+- `xguardd` تا وقتی شمارش روشن است `logqueries` در dnsmasq را روشن می‌کند (لاگ در `/tmp/xguard/dns.log`، حداکثر ۲۵۶ کیلوبایت) و با خاموش شدن، تنظیمات خودتان را برمی‌گرداند.
+- تست‌ها: `tests/test-acct.sh` (۳۱ بررسی: پارسرها، دلتا، ماندگاری، تغییر روز، نگه‌داری، ریست)؛ همچنین روی Xiaomi 4A با ترافیک واقعی در یک کپی ایزوله از ruleset سنجیده شد (شمارش هر سایت از مسیر REDIRECT، شمارش لیست سفید، کاهش سرعت تا عدد تعیین‌شده).
+- محدودیت‌ها: فقط IPv4؛ flow offloading فایروال باید خاموش بماند؛ شمارش فقط وقتی xguard روشن است کار می‌کند.
+
 ## 1.0.1 — UI polish / ظاهر جدید
 
 **EN**

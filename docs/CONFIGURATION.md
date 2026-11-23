@@ -127,6 +127,52 @@ config limit
 ```
 Implemented as nftables byte-rate **policers**: excess packets are dropped and TCP slows down. `mac` limits are applied to uploads by MAC and to downloads by the IPs found in `/tmp/dhcp.leases`.
 
+## Usage report and daily quotas (`config quota`)
+
+xguard counts the traffic of **every client IP** in two classes and can give selected users a **daily allowance per class**. When a user uses up a class, only that class is slowed down (or cut off), for the rest of the day.
+
+| Class | What it is | Where it is counted |
+|---|---|---|
+| **whitelist** (`wl`) | Everything that does **not** enter the tunnel: destinations you exempted by IP/CIDR or by domain (the exempted domains' addresses are put into `bypass_dyn`), and clients/interfaces set to `direct`. | forward hook, between a LAN client and `wan_if` |
+| **vpn** (`vpn`) | Connections xguard redirected to xray (they are tagged `ct mark 0x58……`). | input (client → xray) and output (xray → client) |
+
+A domain that is exempted **only** by an xray rule (`keyword:…`, or a name that was never resolved through the router's dnsmasq) still enters xray and is counted as `vpn`.
+
+```
+config quota
+	option name 'ali'
+	option ip '192.168.5.60'      # or: option mac 'aa:bb:cc:dd:ee:ff' (all of its DHCP addresses)
+	option wl_mb '2048'           # whitelist allowance per day in MiB; 0 or missing = unlimited (count only)
+	option wl_kbps '128'          # whitelist speed (kbit/s, both directions) once the allowance is used up; 0 = cut off
+	option vpn_mb '512'           # vpn allowance per day in MiB
+	option vpn_kbps '64'          # vpn speed once it is used up; 0 = cut off
+```
+
+- The allowance is enforced **inside the kernel** (nftables `quota` + `limit` objects), so the slow-down starts at the exact byte, not at the next poll.
+- **Reset**: once a day at `reset_time` (router-local time = UTC + `tz_offset` minutes; defaults `00:00` and `210` = Tehran). The finished day is kept as a report. `xguardctl usage-reset [ip:1.2.3.4|mac:aa:…]` or the **Reset** button zeroes one user at any time.
+- **A reboot does not lose the numbers**: usage is written to flash (`/etc/xguard/acct/day-YYYYMMDD.json.gz`, a few KB per day) every `acct_save` seconds (default 600) and at shutdown, and the ruleset is re-seeded with it at boot. A power cut can lose at most the last `acct_save` seconds. There is no RTC: a router clock that is behind the last saved time never starts a new day.
+- Throttled users keep working (slowly); nothing is blocked unless you set the speed to `0`.
+
+**Report** (web UI → *Usage*, or `xguardctl usage [YYYYMMDD]` as JSON): per client IP, the bytes of both classes and a breakdown per **site / app**. Sites come from dnsmasq's query log (kept in RAM only, `/tmp/xguard/dns.log`, max ~256 KB): the name the client *asked for* is used, so `www.instagram.com` is not hidden behind a CDN name. The web UI groups sites into apps (YouTube, Instagram, Telegram, …) with a built-in list. Telegram's address ranges are recognised without DNS. Traffic whose name cannot be known (DoH/DoT, hard-coded IPs) is shown by IP.
+
+Options in `config main`:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `accounting` | `1` | Counting, reports and quotas. `0` removes the counting rules and restores dnsmasq's own logging settings. |
+| `reset_time` | `00:00` | When the accounting day starts (router-local). |
+| `tz_offset` | `210` | Minutes between UTC and the router-local time (Tehran = 210; the router itself may run on UTC). |
+| `acct_days` | `7` | Day reports kept on flash. |
+| `acct_save` | `600` | Seconds between flash writes (flash wear: one small write per interval). |
+| `acct_interval` | `30` | Seconds between harvests of the kernel counters. |
+
+Limits and caveats:
+- IPv4 only. Needs the firewall's *flow offloading* to be off (OpenWrt default); offloaded flows bypass nftables and would not be counted.
+- Each class keeps up to 4096 (client, remote IP) pairs for 5 minutes in the kernel; if a client opens more than that (e.g. BitTorrent) the extra bytes are still in the client's total but shown as "not itemised".
+- The per-site view is as accurate as DNS: several sites on one CDN address are attributed to the one that was resolved last.
+- The report lists every client that sent traffic through the router; the stored day files contain the sites a person visited. Delete them with **Clear reports** / `xguardctl usage-clear`.
+- Accounting works only while xguard is enabled (the counters live in its nftables table).
+
 ## CLI: `xguardctl`
 
 | Command | |
@@ -137,6 +183,9 @@ Implemented as nftables byte-rate **policers**: excess packets are dropped and T
 | `update-xray` | Drop the xray in RAM and fetch it again from `source` |
 | `push-xray [sha256]` | Read `xray.gz` from stdin into RAM (see [INSTALL.md](INSTALL.md)) |
 | `enable` / `disable` | Set `main.enabled` |
+| `usage [YYYYMMDD]` | Report as JSON: per client IP the bytes of both classes and per site; quota users |
+| `usage-reset [key]` | Zero the daily usage of one quota user (`ip:1.2.3.4`, `mac:aa:…`) or of all |
+| `usage-clear` | Delete the stored reports |
 | `genkey` | Create `/etc/xguard/id_ed25519` and print the public key |
 | `test-config <node>` | Run `xray run -test` on the generated config |
 

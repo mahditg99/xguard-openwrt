@@ -30,7 +30,7 @@ echo ">> preparing rootfs overlay"
 rm -rf files out
 mkdir files
 tar xf xguard-files.tar -C files
-chmod 755 files/etc/init.d/xguard files/etc/uci-defaults/90-xguard files/usr/sbin/xguardd files/usr/sbin/xguardctl \
+chmod 755 files/etc/init.d/xguard files/etc/uci-defaults/90-xguard files/usr/sbin/xguardd files/usr/sbin/xguardctl files/usr/sbin/xguardacct\
           files/usr/libexec/xguard/fetch
 chmod 600 files/etc/config/xguard
 chmod 644 files/usr/lib/xguard/*.uc files/usr/share/rpcd/ucode/xguard.uc files/usr/share/rpcd/acl.d/xguard.json

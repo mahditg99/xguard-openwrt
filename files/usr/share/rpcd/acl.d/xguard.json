@@ -3,12 +3,12 @@
 		"description": "xguard VPN",
 		"read": {
 			"ubus": {
-				"xguard": [ "status", "get_config", "logs", "devices", "test_link", "link_to_json" ]
+				"xguard": [ "status", "get_config", "logs", "devices", "test_link", "link_to_json", "usage" ]
 			}
 		},
 		"write": {
 			"ubus": {
-				"xguard": [ "save_config", "command" ]
+				"xguard": [ "save_config", "command", "usage_reset", "usage_clear" ]
 			}
 		}
 	}

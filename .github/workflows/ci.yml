@@ -13,8 +13,8 @@ jobs:
 
       - name: Shell syntax (POSIX sh for the router, bash for tools)
         run: |
-          for f in files/usr/sbin/xguardd files/usr/sbin/xguardctl files/usr/libexec/xguard/fetch \
-                   files/etc/init.d/xguard files/etc/uci-defaults/90-xguard tests/sim-supervisor.sh tools/mirror/*.sh; do
+          for f in files/usr/sbin/xguardd files/usr/sbin/xguardctl files/usr/sbin/xguardacct files/usr/libexec/xguard/fetch\
+                   files/etc/init.d/xguard files/etc/uci-defaults/90-xguard tests/sim-supervisor.sh tests/test-acct.sh tools/mirror/*.sh; do
             echo "sh -n $f"; sh -n "$f"
           done
           for f in tools/*.sh; do echo "bash -n $f"; bash -n "$f"; done
