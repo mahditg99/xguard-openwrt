@@ -23,7 +23,7 @@ const TBL = getenv('XGUARD_TABLE') || 'xguard';	// tests load a renamed copy of 
 const AD = RUN + '/acct';			// RAM
 const FD = ETC + '/acct';			// flash
 const DNSLOG = getenv('XGUARD_DNSLOG') || RUN + '/dns.log';
-const MAX_SITES = 200;
+const MAX_SITES = 300;
 const MAX_CLIENTS = 128;
 
 function now() {
@@ -132,6 +132,23 @@ function site_of_name(n) {
 	return join('.', slice(l, -2));
 }
 
+function is_ip(s) {
+	return match(s, /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) != null;
+}
+
+// r3---sn-4g5e6nzz.googlevideo.com -> *.googlevideo.com ; download.windowsupdate.com stays as it is
+function host_name(n) {
+	let l = split(n, '.');
+	let base = site_of_name(n);
+	let pre = slice(l, 0, length(l) - length(split(base, '.')));
+	if (!length(pre))
+		return base;
+	for (let x in pre)
+		if (index(x, '---') >= 0 || length(x) > 24 || match(x, /^[a-z]{0,3}[0-9a-f-]*[0-9]{4,}/))
+			return '*.' + base;
+	return join('.', pre) + '.' + base;
+}
+
 function ip2int(ip) {
 	let o = split(ip, '.');
 	return int(o[0]) * 16777216 + int(o[1]) * 65536 + int(o[2]) * 256 + int(o[3]);
@@ -234,7 +251,7 @@ function read_dns(st, cfg) {
 		let nm = lc(q[m[1] + '|' + m[2]] || m[4]);
 		if (!match(nm, /^[a-z0-9._-]+$/) || match(nm, /\.(arpa|lan|local|localdomain)$/))
 			continue;
-		out += m[5] + '\t' + site_of_name(rtrim(nm, '.')) + '\n';
+		out += m[5] + '\t' + host_name(rtrim(nm, '.')) + '\n';
 		count++;
 		// dnsmasq only fills bypass_dyn for answers from upstream; cached answers are added here
 		if (length(doms) && !match(m[5], /^(0|127)\./) && bypass_match(rtrim(nm, '.'), doms))
@@ -354,17 +371,37 @@ function add_site(c, site, w, v) {
 	c.s[site][1] += v;
 }
 
-function trim_sites(c) {
-	let ks = keys(c.s);
-	if (length(ks) <= MAX_SITES + 60)
-		return;
-	let arr = sort(ks, (a, b) => (c.s[a][0] + c.s[a][1]) - (c.s[b][0] + c.s[b][1]));
-	let drop = length(arr) - MAX_SITES;
-	for (let i = 0; i < drop; i++) {
-		if (arr[i] != '~other')
-			add_site(c, '~other', c.s[arr[i]][0], c.s[arr[i]][1]);
-		delete c.s[arr[i]];
+function by_size(s) {
+	return sort(keys(s), (a, b) => (s[a][0] + s[a][1]) - (s[b][0] + s[b][1]));
+}
+
+// shrink a { name: [w, v] } map to about `max` entries: the smallest host names are folded into their site first,
+// only then into ~other
+function fold(s, max) {
+	let c = { s: s };
+	for (let k in by_size(s)) {
+		if (length(s) <= max)
+			return s;
+		let base = (is_ip(k) || k == '~other') ? k : site_of_name(k);
+		if (base == k)
+			continue;
+		add_site(c, base, s[k][0], s[k][1]);
+		delete s[k];
 	}
+	for (let k in by_size(s)) {
+		if (length(s) <= max)
+			break;
+		if (k == '~other')
+			continue;
+		add_site(c, '~other', s[k][0], s[k][1]);
+		delete s[k];
+	}
+	return s;
+}
+
+function trim_sites(c) {
+	if (length(c.s) > MAX_SITES + 60)
+		fold(c.s, MAX_SITES);
 }
 
 function client_of(st, ip) {
@@ -720,24 +757,14 @@ function report(day) {
 			w_mb: l.w_mb || 0, w_kbps: (l.w_kbps == null ? 0 : l.w_kbps), v_mb: l.v_mb || 0, v_kbps: (l.v_kbps == null ? 0 : l.v_kbps)
 		});
 	}
-	// keep the answer small: top sites per client, the tail is folded into ~other
+	// bounded answer: the same number of names per client as the state keeps
 	let clients = {};
 	for (let ip in keys(st.clients)) {
 		let c = st.clients[ip];
-		let ks = sort(keys(c.s || {}), (a, b) => (c.s[b][0] + c.s[b][1]) - (c.s[a][0] + c.s[a][1]));
 		let s = {};
-		let i = 0;
-		for (let k in ks) {
-			if (i++ < 80 || k == '~other')
-				s[k] = c.s[k];
-			else {
-				if (!s['~other'])
-					s['~other'] = [ 0, 0 ];
-				s['~other'][0] += c.s[k][0];
-				s['~other'][1] += c.s[k][1];
-			}
-		}
-		clients[ip] = { w: c.w, v: c.v, s: s };
+		for (let k in keys(c.s || {}))
+			s[k] = [ c.s[k][0], c.s[k][1] ];
+		clients[ip] = { w: c.w, v: c.v, s: fold(s, MAX_SITES) };
 	}
 	return {
 		day: st.day, today: day_of(ts, p), saved: st.saved, next_reset: next_reset(ts, p),
@@ -748,5 +775,5 @@ function report(day) {
 }
 
 export { RUN, ETC, now, day_params, day_of, next_reset, parse_pairs, parse_clients, parse_counters, parse_quotas,
-	site_of_name, ip_site, load_state, save_ram, save_flash, list_days, harvest, reset_user, clear_stats, report,
+	site_of_name, host_name, fold, ip_site, load_state, save_ram, save_flash, list_days, harvest, reset_user, clear_stats, report,
 	seeds, write_map, reload_rules, read_dns, collect_sets, read_gz, update_known, bypass_match, lan_info };

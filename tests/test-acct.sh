@@ -162,9 +162,9 @@ print((type(j) == 'array') ? join(',', j) : j, '\n');
 EOF
 q() { ucode $SIM/q.uc $RUN/acct/today.json "$1" | sed 's/^null$//'; }
 eq "client totals (cli_w/cli_v)" "6000,9000" "$(q clients/192.168.5.60/w),$(q clients/192.168.5.60/v)"
-eq "site from DNS CNAME chain (asked name wins)" "0,8000" "$(q clients/192.168.5.60/s/instagram.com)"
-eq "site from DNS cache hit" "1500" "$(q clients/192.168.5.61/s/digikala.com | cut -d, -f1)"
-eq "co.uk site" "400" "$(q clients/192.168.5.61/s/example.co.uk | cut -d, -f1)"
+eq "site from DNS CNAME chain (asked name wins)" "0,8000" "$(q clients/192.168.5.60/s/www.instagram.com)"
+eq "site from DNS cache hit" "1500" "$(q clients/192.168.5.61/s/static.digikala.com | cut -d, -f1)"
+eq "co.uk site" "400" "$(q clients/192.168.5.61/s/shop.example.co.uk | cut -d, -f1)"
 eq "IP without DNS name stays an IP" "600" "$(q clients/192.168.5.60/s/7.7.7.7 | cut -d, -f1)"
 eq "telegram by address range" "700" "$(q clients/192.168.5.60/s/telegram.org | cut -d, -f2)"
 eq "quota user usage from counters" "6000,9000" "$(q users/ip:192.168.5.60/w),$(q users/ip:192.168.5.60/v)"
@@ -179,13 +179,13 @@ mkstate 6500 9100 "6500 bytes" "100 mbytes"
 XGUARD_NOW=$((t0+30)) $A harvest 2>$SIM/err2
 eq "delta added once (client)" "6500" "$(q clients/192.168.5.60/w)"
 eq "delta added once (site)" "1100" "$(q clients/192.168.5.60/s/7.7.7.7 | cut -d, -f1)"
-eq "unchanged element adds nothing" "1500" "$(q clients/192.168.5.61/s/digikala.com | cut -d, -f1)"
+eq "unchanged element adds nothing" "1500" "$(q clients/192.168.5.61/s/static.digikala.com | cut -d, -f1)"
 eq "throttled flag from the quota object" "0,1" "$(q users/ip:192.168.5.60/tw),$(q users/ip:192.168.5.60/tv)"
 
 # ---- 4. element re-created (counter went down) counts from zero ------------------------------
 setfile pair_w pair_w "ipv4_addr . ipv4_addr" "192.168.5.61 . 5.6.7.8 counter packets 1 bytes 100 expires 4m"
 XGUARD_NOW=$((t0+60)) $A harvest 2>/dev/null
-eq "re-created element: +100, not negative" "1600" "$(q clients/192.168.5.61/s/digikala.com | cut -d, -f1)"
+eq "re-created element: +100, not negative" "1600" "$(q clients/192.168.5.61/s/static.digikala.com | cut -d, -f1)"
 
 # ---- 5. flash persistence + restart ----------------------------------------------------------
 XGUARD_NOW=$((t0+700)) $A harvest 2>/dev/null		# >600 s since start -> day file written
@@ -322,6 +322,50 @@ printf "config main main\n\toption enabled 1\n\tlist wan_if wan\n" > $SIM/conf/x
 XGUARD_NOW=$((t0+30)) $A harvest 2>/dev/null
 rm -f $RUN/acct/map.json; XGUARD_NOW=$((t0+60)) $A harvest 2>/dev/null
 eq "default switched off: its users are gone" "" "$(q users/ip:192.168.5.104/w)"
+
+# ---- 14. full host names, random labels collapsed, folding -----------------------------------------------
+cat > $SIM/t2.uc <<'EOF'
+import { host_name, fold } from './lib/acctlib.uc';
+print(join(',', [ host_name('download.windowsupdate.com'), host_name('r3---sn-4g5e6nzz.googlevideo.com'), host_name('www.bbc.co.uk'), host_name('google.com') ]), '\n');
+let m = { 'a.x.com': [1,0], 'b.x.com': [2,0], 'big.y.com': [100,0], '1.2.3.4': [3,0] };
+fold(m, 3);
+print(join(',', sort(keys(m))), ' ', m['x.com'] ? m['x.com'][0] : 0, '\n');
+EOF
+out=$(cd $SIM && ucode $SIM/t2.uc 2>&1)
+eq "host names are kept, random ones collapsed" "download.windowsupdate.com,*.googlevideo.com,www.bbc.co.uk,google.com" "$(echo "$out" | sed -n 1p)"
+eq "small host names fold into their site first" "1.2.3.4,big.y.com,x.com 3" "$(echo "$out" | sed -n 2p)"
+
+# ---- 15. blacklist --------------------------------------------------------------------------------------
+cat > $SIM/conf/xguard <<'EOF'
+config main 'main'
+	option enabled '1'
+	option node 'n1'
+	list wan_if 'wan'
+config node 'n1'
+	option type 'link'
+	option link 'vless://11111111-2222-3333-4444-555555555555@203.0.113.7:443?type=tcp&security=none#t'
+config bypass
+	list cidr 'example.ir'
+config block
+	list target 'windowsupdate.com'
+	list target '203.0.113.99'
+	list target '198.51.100.0/24'
+	list target 'keyword:torrent'
+	list target 'bad entry!'
+EOF
+N=$(ucode $SIM/lib/gen.uc nft)
+echo "$N" | grep -A6 'set block4' | grep -q '198.51.100.0/24' && ok "blacklisted addresses in the set" || bad "block4 set"
+echo "$N" | grep -q 'iifname != @wan_ifs ip daddr @block4 counter drop' && ok "dropped for every client" || bad "drop rule"
+echo "$N" | grep -q 'fib daddr type local return' && ok "the router itself is never cut off" || bad "local guard"
+eq "domains dnsmasq must refuse" "windowsupdate.com" "$(ucode $SIM/lib/gen.uc blockdns 2>/dev/null)"
+ucode $SIM/lib/gen.uc xray n1 > $SIM/x.json 2>/dev/null
+cat > $SIM/t3.uc <<'EOF'
+import { readfile } from 'fs';
+let j = json(readfile('/tmp/xgacct/x.json'));
+let r = j.routing.rules[1];
+print(r.outboundTag, ' ', join(',', r.domain), ' ', j.inbounds[0].sniffing.enabled, '\n');
+EOF
+eq "xray refuses them before any other rule, sniffing on" "block domain:windowsupdate.com,keyword:torrent true" "$(ucode $SIM/t3.uc)"
 
 echo
 echo "passed=$pass failed=$fail"

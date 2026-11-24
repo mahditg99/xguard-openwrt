@@ -3,6 +3,8 @@
 ## 1.2.0 — default allowance, exempted domains actually exempted / سقف پیش‌فرض و رفع استثنای دامنه‌ای
 
 **EN**
+- New **blacklist** (`config block`, tab *Network and devices*): domains / IPv4 / CIDR nobody may reach; ready-made lists for background updates; **block** button in the usage report.
+- Usage report keeps **full host names** (random per-connection labels collapsed to `*.site`), shown two-level: app or site, then hosts. Windows / Apple / Google Play / Xiaomi updates are grouped separately.
 - Fix (important, present since 0.1.0): addresses of exempted **domains** never reached the nft set `bypass_dyn`: xguard wrote an option OpenWrt's dnsmasq ignores. Those sites therefore still went through xray, were counted as **VPN**, were slowed when the VPN allowance ran out, and stopped working when the tunnel was down. It now uses a `config ipset` section (`dhcp.xguard_bypass`).
 - Also: cached DNS answers of exempted domains are added from the query log, addresses stay while in use and survive ruleset reloads; removing a domain flushes the set.
 - Fix: raising the allowance of a throttled user did not free them.
@@ -10,6 +12,8 @@
 - Fix: with an empty `dhcp.leases` (after a reboot) MAC-based quotas found no address; the ARP table is used as well.
 
 **FA**
+- **لیست سیاه** جدید (`config block`، تب *شبکه و دستگاه‌ها*): دامنه / IPv4 / CIDR که هیچ‌کس به آن‌ها نمی‌رسد؛ لیست آماده برای به‌روزرسانی‌های پس‌زمینه؛ دکمهٔ **مسدود** در گزارش مصرف.
+- گزارش مصرف **نام کامل میزبان‌ها** را نگه می‌دارد (برچسب‌های تصادفی هر اتصال به `*.site` جمع می‌شود) و دو سطحی نشان می‌دهد: برنامه یا سایت، بعد میزبان‌ها. آپدیت‌های ویندوز / اپل / Google Play / شیائومی جدا گروه می‌شوند.
 - رفع باگ (مهم، از 0.1.0): آدرس **دامنه‌های** استثنا هرگز به مجموعهٔ `bypass_dyn` نمی‌رسید چون xguard گزینه‌ای می‌نوشت که dnsmasq در OpenWrt نادیده می‌گیرد. پس آن سایت‌ها همچنان از xray رد می‌شدند، **VPN** شمرده می‌شدند، با تمام شدن سقف VPN کند می‌شدند و با قطع تونل از کار می‌افتادند. حالا از بخش `config ipset` (`dhcp.xguard_bypass`) استفاده می‌شود.
 - همچنین پاسخ‌های کش‌شدهٔ DNS دامنه‌های استثنا از لاگ پرسمان اضافه می‌شوند، آدرس‌ها تا وقتی استفاده می‌شوند می‌مانند و با بارگذاری مجدد قواعد پاک نمی‌شوند؛ حذف دامنه مجموعه را خالی می‌کند.
 - رفع باگ: بالا بردن سقف کاربرِ محدودشده او را آزاد نمی‌کرد.

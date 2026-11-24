@@ -116,6 +116,18 @@ Destinations that clients on `vpn` interfaces may reach **directly**, outside th
 - **Working even while xray is down:** `domain:`/`full:` entries are also given to dnsmasq as a direct upstream (`server=/domain/ip`, works with the stock dnsmasq) and, **if dnsmasq was built with nftset (package `dnsmasq-full`)**, their resolved addresses go into the nft set `bypass_dyn`, which the kill-switch and the redirect skip, exactly like an IP entry. With the stock dnsmasq (`dnsmasq --version` shows `no-nftset`) domains still work whenever xray is running, which now includes a dead node (xray is no longer restarted for a single node). `keyword:` entries can only use the xray rule.
 - Use sparingly: every entry deliberately punches a hole in the VPN (not in the kill-switch).
 
+## `config block` — blacklist
+
+```
+config block
+	list target 'windowsupdate.com'    # domain + all sub-domains (also full: / keyword: / *.suffix)
+	list target '203.0.113.5'          # IPv4 or CIDR
+```
+Destinations **nobody** may reach, VPN or direct; it wins over `config bypass`.
+- IPv4/CIDR: dropped by nftables for every client (access to the router itself is never affected).
+- Domains: dnsmasq answers "no such name" (`server=/domain/`) and xray refuses the sniffed name for tunnelled connections. A `direct` client that uses its own DNS (DoH) can get past a domain entry — block the addresses too. `keyword:` only works for tunnelled connections.
+- Works while xguard is enabled. The web UI has ready-made lists for Windows / Apple / Google Play / Xiaomi background downloads, and a **block** button next to every entry of the usage report.
+
 ## `config limit`
 
 ```

@@ -96,7 +96,7 @@ function bypass_split(list) {
 function load_config() {
 	let dir = getenv('XGUARD_CONFDIR');	// test hook
 	let c = dir ? cursor(dir, dir + '/.save') : cursor();
-	let cfg = { main: {}, nodes: [], ifaces: [], devices: [], bypass: [], limits: [], quotas: [] };
+	let cfg = { main: {}, nodes: [], ifaces: [], devices: [], bypass: [], block: [], limits: [], quotas: [] };
 
 	c.foreach('xguard', 'main', (s) => { cfg.main = s; });
 	c.foreach('xguard', 'node', (s) => { if (s.enabled != '0') push(cfg.nodes, s); });
@@ -105,6 +105,7 @@ function load_config() {
 	c.foreach('xguard', 'bypass', (s) => { for (let x in arr(s.cidr)) push(cfg.bypass, x); });
 	c.foreach('xguard', 'limit', (s) => { push(cfg.limits, s); });
 	c.foreach('xguard', 'quota', (s) => { push(cfg.quotas, s); });
+	c.foreach('xguard', 'block', (s) => { for (let x in arr(s.target)) push(cfg.block, x); });
 
 	cfg.main.enabled = (mget(cfg.main, 'enabled', '0') == '1');
 	return cfg;
@@ -183,7 +184,10 @@ function gen_xray(cfg, node) {
 	for (let b in bp.bad)
 		warn(sprintf('xguard: ignoring invalid bypass entry "%s" (use IPv4/CIDR or a domain like example.com)\n', b));
 	// domain rules can only match when xray sniffs the TLS SNI / HTTP Host / QUIC, so it is switched on for them
-	let sniff = (mget(m, 'sniffing', '0') == '1') || length(bp.domains) > 0;
+	let blk = bypass_split(cfg.block);
+	for (let b in blk.bad)
+		warn(sprintf('xguard: ignoring invalid blacklist entry "%s"\n', b));
+	let sniff = (mget(m, 'sniffing', '0') == '1') || length(bp.domains) > 0 || length(blk.domains) > 0;
 	let sn = (protos) => sniff ? { enabled: true, destOverride: protos, routeOnly: true } : { enabled: false };
 	let is_ssh = (mget(node, 'type', 'link') == 'ssh');
 	let dns_bypass = trim(mget(m, 'dns_bypass', ''));
@@ -215,6 +219,9 @@ function gen_xray(cfg, node) {
 	let rules = [
 		{ type: 'field', inboundTag: [ 'dns-in' ], outboundTag: 'dns-out' }
 	];
+	// the blacklist wins over everything else, including the exempted domains below
+	if (length(blk.domains))
+		push(rules, { type: 'field', domain: blk.domains, outboundTag: 'block' });
 	let dns_servers = [];
 	if (length(boot_hosts)) {
 		let boot_ips = filter(split(trim(mget(m, 'bootstrap_dns', '1.1.1.1 8.8.8.8')), /[ ,]+/), (x) => match(x, RE_IP));
@@ -581,6 +588,12 @@ function gen_nft(cfg, seeds) {
 	let dyn = (seeds && type(seeds.dyn) == 'array') ? filter(seeds.dyn, (x) => match(x, RE_IP)) : [];
 	o += '\tset bypass_dyn {\n\t\ttype ipv4_addr\n\t\tflags dynamic,timeout\n\t\ttimeout 12h\n\t\tsize 8192\n'
 		+ (length(dyn) ? '\t\telements = { ' + join(', ', dyn) + ' }\n' : '') + '\t}\n';
+	// blacklist (IPv4/CIDR): dropped for every client before anything else can redirect or forward it.
+	// Blacklisted domains are refused by dnsmasq (and by xray for tunnelled connections), see xguardd / gen_xray.
+	let blocked_ips = bypass_split(cfg.block).ips;
+	o += set_decl('block4', 'ipv4_addr', blocked_ips, 'interval\n\t\tauto-merge');
+	o += '\tchain block_pre {\n\t\ttype filter hook prerouting priority -175; policy accept;\n'
+		+ '\t\tfib daddr type local return\n\t\tiifname != @wan_ifs ip daddr @block4 counter drop\n\t}\n';
 	o += '\tchain dyn_keep {\n\t\ttype filter hook prerouting priority -170; policy accept;\n'
 		+ '\t\tip daddr @bypass_dyn update @bypass_dyn { ip daddr timeout 12h }\n\t}\n';
 

@@ -137,6 +137,7 @@ const STATUS_FA = { running: 'متصل', degraded: 'قطع (kill-switch فعال
 async function load() {
   [cfg, st, dev] = await Promise.all([xg('get_config'), xg('status'), xg('devices')]);
   cfg.quotas = cfg.quotas || [];
+  cfg.block = cfg.block || [];
   $('#enabled').checked = cfg.main.enabled === '1';
   editing = -1;
   paintHead(); render();
@@ -455,6 +456,18 @@ function vNet(m) {
   m.append(h('div', { class: 'card' }, h('b', {}, 'مقصدهایی که از VPN رد نمی‌شوند (IP، CIDR یا دامنه؛ هر خط یکی)'),
     h('p', { class: 'hint' }, 'شبکه‌های خصوصی (192.168/16، 10/8، …) همیشه مستقیم‌اند. IP یا CIDR (مثل 203.0.113.0/24) مستقیماً با nftables مستثنا می‌شود و حتی اگر xray خاموش باشد باز می‌ماند. دامنه (مثل example.ir، همراه همهٔ زیردامنه‌ها؛ برای همهٔ سایت‌های یک پسوند بنویسید *.ir؛ یا full:www.example.ir و keyword:bank) با قانون مسیریابی xray مستقیم می‌شود: sniffing خودکار روشن می‌شود و با خاموش بودن xray این دامنه‌ها هم مثل بقیه قطع می‌شوند (kill-switch). geosite: پشتیبانی نمی‌شود.'),
     h('textarea', { onchange: e => { cfg.bypass = e.target.value.split(/\s+/).filter(Boolean); } }, cfg.bypass.join('\n')), saveBar()));
+  m.append(blockCard());
+}
+
+// destinations nobody may reach, with ready-made lists for the usual background downloads
+function blockCard() {
+  cfg.block = cfg.block || [];
+  const ta = h('textarea', { placeholder: 'example.com\n*.ads.example\n203.0.113.5', onchange: e => { cfg.block = e.target.value.split(/\s+/).filter(Boolean); } }, cfg.block.join('\n'));
+  const preset = name => h('button', { class: 'b sec', onclick: () => { for (const d of appDomains(name)) if (!cfg.block.includes(d)) cfg.block.push(d); ta.value = cfg.block.join('\n'); say('«' + name + '» اضافه شد؛ «ذخیره و اعمال» را بزنید'); } }, '+ ' + name);
+  return h('div', { class: 'card', style: 'border-color:color-mix(in srgb,var(--bad) 45%,var(--bd))' }, h('b', {}, 'لیست سیاه — مقصدهایی که هرگز باز نمی‌شوند (دامنه، IP یا CIDR؛ هر خط یکی)'),
+    h('p', { class: 'hint' }, 'برای همهٔ دستگاه‌ها (VPN و مستقیم) و بر لیست استثنا مقدم است. دامنه همراه همهٔ زیردامنه‌هایش بسته می‌شود (dnsmasq نامش را پیدا نمی‌کند و xray هم در تونل ردش می‌کند). IP/CIDR مستقیماً در فایروال دور ریخته می‌شود. دستگاهی که «مستقیم» است و از DNS دیگری (DoH) استفاده می‌کند ممکن است از مسدودسازی دامنه عبور کند؛ برای آن IP را مسدود کنید. keyword: فقط برای دستگاه‌های داخل VPN اثر دارد.'),
+    h('div', { class: 'row' }, ['آپدیت ویندوز', 'آپدیت Apple', 'دانلود Google Play / Chrome', 'آپدیت شیائومی'].map(preset)),
+    ta, saveBar());
 }
 
 function vLimits(m) {
@@ -499,17 +512,21 @@ function vSettings(m) {
 // A "site" is what the router counted (registrable domain from DNS, or a bare IP); the app names below are only
 // a display grouping done here in the browser.
 const APPS = [
+  ['آپدیت ویندوز', ['windowsupdate.com', 'update.microsoft.com', 'delivery.mp.microsoft.com', 'dsp.mp.microsoft.com', 'download.microsoft.com']],
+  ['آپدیت Apple', ['swcdn.apple.com', 'updates.cdn-apple.com', 'appldnld.apple.com', 'mesu.apple.com', 'swscan.apple.com']],
+  ['دانلود Google Play / Chrome', ['gvt1.com', 'gvt2.com']],
+  ['آپدیت شیائومی', ['bigota.d.miui.com', 'hugeota.d.miui.com', 'update.miui.com']],
   ['YouTube', ['youtube.com', 'googlevideo.com', 'ytimg.com', 'youtu.be', 'youtube-nocookie.com']],
   ['Instagram', ['instagram.com', 'cdninstagram.com']],
   ['Facebook / Meta', ['facebook.com', 'fbcdn.net', 'fb.com', 'facebook.net', 'messenger.com', 'fbsbx.com', 'meta.com']],
   ['WhatsApp', ['whatsapp.com', 'whatsapp.net', 'wa.me']],
   ['Telegram', ['telegram.org', 't.me', 'telegram.me', 'telegra.ph', 'tdesktop.com', 'cdn-telegram.org', 'telesco.pe']],
-  ['Google', ['google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com', 'google-analytics.com', 'googletagmanager.com', 'doubleclick.net', 'googlesyndication.com', 'gvt1.com', 'gvt2.com', '1e100.net', 'ggpht.com', 'app-measurement.com', 'googleadservices.com', 'android.com', 'gmail.com', 'recaptcha.net', 'google.ir']],
+  ['Google', ['google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com', 'google-analytics.com', 'googletagmanager.com', 'doubleclick.net', 'googlesyndication.com', '1e100.net', 'ggpht.com', 'app-measurement.com', 'googleadservices.com', 'android.com', 'gmail.com', 'recaptcha.net', 'google.ir']],
   ['Netflix', ['netflix.com', 'nflxvideo.net', 'nflximg.net', 'nflxext.com', 'nflxso.net']],
   ['TikTok', ['tiktok.com', 'tiktokcdn.com', 'tiktokv.com', 'byteoversea.com', 'ibytedtos.com', 'musical.ly', 'muscdn.com']],
   ['X / Twitter', ['twitter.com', 'x.com', 'twimg.com', 't.co']],
   ['Apple', ['apple.com', 'icloud.com', 'mzstatic.com', 'apple-dns.net', 'cdn-apple.com', 'icloud-content.com']],
-  ['Microsoft', ['microsoft.com', 'windowsupdate.com', 'msftconnecttest.com', 'live.com', 'office.com', 'office365.com', 'bing.com', 'msedge.net', 'windows.com', 'microsoftonline.com', 'skype.com', 'xboxlive.com', 'azureedge.net', 'windows.net', 'msn.com', 'bing.net', 'trafficmanager.net']],
+  ['Microsoft', ['microsoft.com', 'msftconnecttest.com', 'live.com', 'office.com', 'office365.com', 'bing.com', 'msedge.net', 'windows.com', 'microsoftonline.com', 'skype.com', 'xboxlive.com', 'azureedge.net', 'windows.net', 'msn.com', 'bing.net', 'trafficmanager.net']],
   ['Amazon / AWS', ['amazon.com', 'amazonaws.com', 'cloudfront.net', 'media-amazon.com']],
   ['Cloudflare', ['cloudflare.com', 'cloudflare-dns.com', 'cloudflareinsights.com', 'workers.dev']],
   ['Spotify', ['spotify.com', 'scdn.co', 'spotifycdn.com']],
@@ -571,25 +588,65 @@ function quotaCell(u, c) {
     thr ? h('div', { class: 'hint', style: 'color:var(--bad)' }, 'سقف تمام شد — ', u[c + '_kbps'] > 0 ? ['سرعت ', h('bdi', {}, u[c + '_kbps'] + ' kbit/s')] : 'قطع کامل') : null);
 }
 
+const SLD2 = new Set(['co', 'com', 'org', 'net', 'gov', 'edu', 'ac', 'or', 'ne', 'go', 'sch', 'id', 'mil', 'info', 'biz', 'ltd', 'plc']);
+// the site (registrable domain) a host name belongs to; IPs stay as they are
+function siteOf(h) {
+  if (/^[0-9.]+$/.test(h) || h === '~other') return h;
+  const l = h.replace(/^\*\./, '').split('.');
+  if (l.length <= 2) return l.join('.');
+  return (l[l.length - 1].length === 2 && SLD2.has(l[l.length - 2])) ? l.slice(-3).join('.') : l.slice(-2).join('.');
+}
+const appDomains = name => (APPS.find(a => a[0] === name) || [null, []])[1];
+let uSub = new Set();
+
+async function blockAdd(list, label) {
+  if (!confirm('«' + label + '» برای همهٔ دستگاه‌ها مسدود شود؟\n\n' + list.join('\n'))) return;
+  cfg.block = cfg.block || [];
+  for (const x of list) if (!cfg.block.includes(x)) cfg.block.push(x);
+  await save('به لیست سیاه اضافه شد');
+}
+const isBlocked = x => (cfg.block || []).includes(x);
+function blockBtn(list, label) {
+  if (!list.length) return null;
+  if (list.every(isBlocked)) return h('span', { class: 'hint', style: 'color:var(--bad)' }, 'مسدود است');
+  return h('button', { class: 'b del', style: 'padding:.1rem .6rem;font-size:.8rem', onclick: ev => { ev.stopPropagation(); blockAdd(list, label); } }, 'مسدود');
+}
+// what "block" means for one reported name: a host name blocks itself and its sub-domains
+const blockValue = host => host.replace(/^\*\./, '');
+
 function siteTable(ip, c) {
   const rows = new Map();
-  for (const [site, [w, v]] of Object.entries(c.s || {})) {
-    const app = uGroup ? appOf(site) : null;
-    const key = app || (site === '~other' ? 'سایر (کم‌حجم)' : site);
-    const r = rows.get(key) || { name: key, app: !!app, w: 0, v: 0, n: 0 };
-    r.w += w; r.v += v; r.n++; rows.set(key, r);
+  for (const [host, [w, v]] of Object.entries(c.s || {})) {
+    const other = host === '~other';
+    const app = (!other && uGroup) ? appOf(host) : null;
+    const key = other ? 'سایر (کم‌حجم)' : app || (uGroup ? siteOf(host) : host);
+    const r = rows.get(key) || { name: key, app: !!app, other, w: 0, v: 0, hosts: [] };
+    r.w += w; r.v += v; r.hosts.push([host, w, v]); rows.set(key, r);
   }
   const attributed = [...rows.values()].reduce((a, r) => a + r.w + r.v, 0);
   const lost = (c.w + c.v) - attributed;
-  if (lost > 1024) rows.set('~', { name: 'بدون تفکیک', w: 0, v: 0, n: 0, lost });
+  if (lost > 1024) rows.set('~', { name: 'بدون تفکیک', other: true, w: 0, v: 0, hosts: [], lost });
   const arr = [...rows.values()].sort((a, b) => (b.w + b.v + (b.lost || 0)) - (a.w + a.v + (a.lost || 0)));
-  const all = uAll.has(ip), shown = all ? arr : arr.slice(0, 25);
-  const t = h('table', {}, h('thead', {}, h('tr', {}, ['سایت / برنامه', 'لیست سفید', 'VPN', 'مجموع'].map(x => h('th', {}, x)))),
-    h('tbody', {}, shown.map(r => h('tr', {},
-      h('td', { class: 'mono' }, r.name, r.app && r.n > 1 ? h('span', { class: 'hint' }, ' (' + r.n + ' سایت)') : null),
-      h('td', { class: 'mono' }, r.lost ? '' : fmt(r.w)), h('td', { class: 'mono' }, r.lost ? '' : fmt(r.v)),
-      h('td', { class: 'mono' }, fmt(r.w + r.v + (r.lost || 0)))))));
-  return h('div', {}, t, arr.length > 25 ? h('button', { class: 'b sec', onclick: () => { all ? uAll.delete(ip) : uAll.add(ip); drawUsage(); } }, all ? 'نمایش کمتر' : 'نمایش همه (' + arr.length + ')') : null);
+  const all = uAll.has(ip), shown = all ? arr : arr.slice(0, 30);
+  const tb = h('tbody');
+  const line = (name, w, v, total, btn, attrs, lostRow) => h('tr', attrs || {},
+    h('td', {}, name), h('td', { class: 'mono' }, lostRow ? '' : fmt(w)), h('td', { class: 'mono' }, lostRow ? '' : fmt(v)),
+    h('td', { class: 'mono' }, fmt(total)), h('td', {}, btn));
+  for (const r of shown) {
+    const key = ip + '|' + r.name;
+    // a group with one host that has the same name needs no second level
+    const expandable = !r.other && !(r.hosts.length === 1 && r.hosts[0][0] === r.name);
+    const open = expandable && uSub.has(key);
+    const list = r.other ? [] : r.app ? appDomains(r.name) : [blockValue(r.name)];
+    tb.append(line(h('span', { class: 'mono' }, expandable ? (open ? '▾ ' : '▸ ') : '', h('bdi', {}, r.name), expandable && r.hosts.length > 1 ? h('span', { class: 'hint' }, ' (' + r.hosts.length + ')') : null),
+      r.w, r.v, r.w + r.v + (r.lost || 0), blockBtn(list, r.name),
+      expandable ? { style: 'cursor:pointer', onclick: () => { open ? uSub.delete(key) : uSub.add(key); drawUsage(); } } : {}, r.lost));
+    if (open) for (const [host, w, v] of r.hosts.sort((a, b) => (b[1] + b[2]) - (a[1] + a[2])))
+      tb.append(line(h('bdi', { class: 'mono', style: 'padding-inline-start:1.5rem;font-size:.8rem' }, host), w, v, w + v,
+        blockBtn([blockValue(host)], host), { style: 'background:var(--card)' }));
+  }
+  const t = h('table', {}, h('thead', {}, h('tr', {}, ['سایت / برنامه (برای جزئیات کلیک کنید)', 'لیست سفید', 'VPN', 'مجموع', ''].map(x => h('th', {}, x)))), tb);
+  return h('div', {}, t, arr.length > 30 ? h('button', { class: 'b sec', onclick: () => { all ? uAll.delete(ip) : uAll.add(ip); drawUsage(); } }, all ? 'نمایش کمتر' : 'نمایش همه (' + arr.length + ')') : null);
 }
 
 function drawUsage() {

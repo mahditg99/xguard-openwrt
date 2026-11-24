@@ -9,6 +9,7 @@
 //   gen.uc get <key> [def]    print a main option
 //   gen.uc ifaces             print vpn interface names (for sysctl/ipv6 handling)
 //   gen.uc sources            print xray download sources, one per line
+//   gen.uc blockdns           print the blacklisted domains dnsmasq must refuse
 
 import { load_config, ordered_nodes, node_by_id, gen_xray, gen_nft, gen_lockdown, parse_vars, bypass_split, local_dns, quota_targets } from './core.uc';
 import { seeds, write_map } from './acctlib.uc';
@@ -81,6 +82,15 @@ case 'bypassdns': {
 	let dns = trim(cfg.main.dns_bypass || '');
 	out((dns != '' ? dns : local_dns(cfg.main)) + '\n');
 	for (let d in bp.domains) {
+		let m = match(d, /^(domain|full):(.+)$/);
+		if (m)
+			out(m[2] + '\n');
+	}
+	break;
+}
+case 'blockdns': {
+	// blacklisted domains, one per line (domain:/full: entries; keyword: only works inside xray)
+	for (let d in bypass_split(cfg.block).domains) {
 		let m = match(d, /^(domain|full):(.+)$/);
 		if (m)
 			out(m[2] + '\n');

@@ -121,7 +121,7 @@ dns_nftset() {
 }
 
 dns_hook() {
-	local port want cur changed=0 f dom dns doms="" want_srv want_set s
+	local port want cur changed=0 f dom dns doms="" want_srv want_set s blocked
 	port=$(opt dns_port 15353)
 	want="127.0.0.1#$port"
 	if [ "$1" = on ]; then
@@ -130,8 +130,14 @@ dns_hook() {
 		want_srv="$want"
 		want_set=
 		dnsmasq --version 2>/dev/null | grep -q ' nftset' && want_set="$doms"
+		blocked=$(echo $(gen blockdns 2>/dev/null))
 		for dom in $doms; do
+			case " $blocked " in *" $dom "*) continue;; esac	# the blacklist wins
 			[ -n "$dns" ] && want_srv="$want_srv /$dom/$dns"
+		done
+		# blacklisted domains (and their sub-domains) are never forwarded: dnsmasq answers "no such name"
+		for dom in $blocked; do
+			want_srv="$want_srv /$dom/"
 		done
 		dns_nftset "$(echo $want_set)"
 		cur=$(uci -q get dhcp.@dnsmasq[0].server)

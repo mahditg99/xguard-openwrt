@@ -75,6 +75,10 @@ config main 'main'
 #	option vpn_mb '512'
 #	option vpn_kbps '64'
 
+# config block                          # nobody may reach these (domains, IPv4, CIDR)
+#	list target 'windowsupdate.com'
+#	list target '203.0.113.5'
+
 # config limit
 #	option name 'kid'
 #	option ip '192.168.5.60'           # or: option mac / option iface

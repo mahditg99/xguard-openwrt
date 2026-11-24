@@ -89,7 +89,7 @@ function status() {
 
 function get_config() {
 	let c = cur();
-	let out = { main: {}, nodes: [], ifaces: [], devices: [], bypass: [], limits: [], quotas: [] };
+	let out = { main: {}, nodes: [], ifaces: [], devices: [], bypass: [], block: [], limits: [], quotas: [] };
 	c.foreach('xguard', 'main', (s) => {
 		for (let k in MAIN_KEYS)
 			if (s[k] != null)
@@ -112,6 +112,10 @@ function get_config() {
 	});
 	c.foreach('xguard', 'limit', (s) => {
 		push(out.limits, { name: s.name || '', ip: s.ip || '', mac: s.mac || '', iface: s.iface || '', down: s.down || '0', up: s.up || '0' });
+	});
+	c.foreach('xguard', 'block', (s) => {
+		for (let x in (type(s.target) == 'array' ? s.target : (s.target ? [ s.target ] : [])))
+			push(out.block, x);
 	});
 	c.foreach('xguard', 'quota', (s) => {
 		let q = {};
@@ -167,6 +171,9 @@ function save_config(req) {
 		for (let b in (d.bypass || []))
 			if (!classify_bypass(b))
 				die('bad bypass entry: ' + b + ' (IPv4/CIDR or a domain such as example.com)');
+		for (let b in (d.block || []))
+			if (!classify_bypass(b))
+				die('bad blacklist entry: ' + b + ' (IPv4/CIDR or a domain such as example.com)');
 		for (let q in (d.quotas || [])) {
 			if (!match(q.mac || '', /^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/) && !match(q.ip || '', /^[0-9]{1,3}(\.[0-9]{1,3}){3}(\/[0-9]{1,2})?$/))
 				die('quota "' + (q.name || '?') + '" needs a valid IP or MAC');
@@ -244,6 +251,13 @@ function save_config(req) {
 			if (length(d.bypass)) {
 				let id = c.add('xguard', 'bypass');
 				c.set('xguard', id, 'cidr', d.bypass);
+			}
+		}
+		if (d.block != null) {
+			clean_sections(c, 'block');
+			if (length(d.block)) {
+				let id = c.add('xguard', 'block');
+				c.set('xguard', id, 'target', d.block);
 			}
 		}
 		if (d.limits != null) {
