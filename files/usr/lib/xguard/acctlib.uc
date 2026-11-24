@@ -11,10 +11,10 @@
 //   * a day file on flash (gzip) every few minutes and at shutdown, so a reboot does not lose the day's numbers
 //
 // Everything is overridable through the environment for the sandbox tests:
-//   XGUARD_RUN XGUARD_ETC XGUARD_NFT XGUARD_TABLE XGUARD_NOW XGUARD_DNSLOG
+//   XGUARD_RUN XGUARD_ETC XGUARD_NFT XGUARD_TABLE XGUARD_NOW XGUARD_DNSLOG XGUARD_ADDRS XGUARD_NEIGH XGUARD_LEASES
 
 import { open, popen, readfile, writefile, rename, unlink, stat, mkdir, lsdir } from 'fs';
-import { load_config, gen_nft, quota_targets, num } from './core.uc';
+import { load_config, gen_nft, quota_targets, num, bypass_split, known_clients, in_net, ip_num } from './core.uc';
 
 const RUN = getenv('XGUARD_RUN') || '/tmp/xguard';
 const ETC = getenv('XGUARD_ETC') || '/etc/xguard';
@@ -167,8 +167,23 @@ function load_names() {
 	return names;
 }
 
+// name is matched by one of the bypass entries "domain:x" (and sub-domains) | "full:x" | "keyword:x"
+function bypass_match(name, doms) {
+	for (let d in doms) {
+		let i = index(d, ':');
+		let kind = substr(d, 0, i), v = substr(d, i + 1);
+		if (kind == 'full' && name == v)
+			return true;
+		if (kind == 'domain' && (name == v || substr(name, -(length(v) + 1)) == '.' + v))
+			return true;
+		if (kind == 'keyword' && index(name, v) >= 0)
+			return true;
+	}
+	return false;
+}
+
 // reads the new part of dnsmasq's query log and appends "ip<TAB>site" lines to names.tsv
-function read_dns(st) {
+function read_dns(st, cfg) {
 	let sz = stat(DNSLOG);
 	if (!sz)
 		return 0;
@@ -199,6 +214,8 @@ function read_dns(st) {
 	let nq = 0;
 	let out = '';
 	let count = 0;
+	let doms = cfg ? bypass_split(cfg.bypass).domains : [];
+	let direct = {};
 	for (let line in split(txt, '\n')) {
 		let m = match(line, / ([0-9]+) ([0-9.]+)\/[0-9]+ query\[[A-Za-z0-9]+\] ([^ ]+) from /);
 		if (m) {
@@ -219,7 +236,13 @@ function read_dns(st) {
 			continue;
 		out += m[5] + '\t' + site_of_name(rtrim(nm, '.')) + '\n';
 		count++;
+		// dnsmasq only fills bypass_dyn for answers from upstream; cached answers are added here
+		if (length(doms) && !match(m[5], /^(0|127)\./) && bypass_match(rtrim(nm, '.'), doms))
+			direct[m[5]] = true;
 	}
+	let ips = keys(direct);
+	for (let i = 0; i < length(ips); i += 200)
+		system(NFT + " add element inet " + TBL + " bypass_dyn '{ " + join(', ', slice(ips, i, i + 200)) + " }' >/dev/null 2>&1");
 	if (count) {
 		let nf = open(AD + '/names.tsv', 'a');
 		if (nf) {
@@ -355,7 +378,7 @@ function client_of(st, ip) {
 }
 
 // dynamic sets -> deltas -> per-client / per-site bytes
-function collect_sets(st) {
+function collect_sets(st, self) {
 	let prev = {};
 	for (let line in split(readfile(AD + '/prev.tsv') || '', '\n')) {
 		let i = index(line, ' ');
@@ -381,7 +404,7 @@ function collect_sets(st) {
 			let k = 'c' + cls + ',' + e[0];
 			cur += k + ' ' + e[1] + '\n';
 			let d = delta(k, e[1]);
-			if (d > 0)
+			if (d > 0 && !(self && self[e[0]]))
 				client_of(st, e[0])[cls] += d;
 		}
 		txt = nft_text('list set inet ' + TBL + ' pair_' + cls);
@@ -391,7 +414,7 @@ function collect_sets(st) {
 			let k = 'p' + cls + ',' + e[0] + ',' + e[1];
 			cur += k + ' ' + e[2] + '\n';
 			let d = delta(k, e[2]);
-			if (d <= 0)
+			if (d <= 0 || (self && self[e[0]]))
 				continue;
 			if (names == null)
 				names = load_names();
@@ -418,42 +441,146 @@ function read_map() {
 
 // named counters/quotas -> usage + "throttled" flags of the quota users
 function collect_users(st, cfg) {
+	let defaults_on = int(mget(cfg.main, 'def_wl_mb', '0')) > 0 || int(mget(cfg.main, 'def_vpn_mb', '0')) > 0;
 	let ctr = parse_counters(nft_text('list counters table inet ' + TBL));
 	let qta = parse_quotas(nft_text('list quotas table inet ' + TBL));
 	let map = read_map();
 	if (map == null) {
 		map = [];
 		for (let q in quota_targets(cfg))
-			push(map, { idx: q.idx, key: q.key, name: q.name });
+			push(map, { idx: q.idx, key: q.key, name: q.name, def: q.def, dev: q.dev });
 	}
-	// a quota that was removed from the configuration disappears from the report too
+	// A quota that was removed from the configuration disappears. Users of the default allowance are only dropped when
+	// the default is switched off: one that is briefly missing (e.g. at boot) must not get a fresh allowance.
 	let want = {};
 	for (let q in map)
 		want[q.key] = true;
 	for (let k in keys(st.users))
-		if (!want[k])
+		if (!want[k] && !(st.users[k].def && defaults_on))
 			delete st.users[k];
 	for (let q in map) {
 		let u = st.users[q.key];
 		if (!u)
 			u = st.users[q.key] = { name: q.name, w: 0, v: 0, tw: 0, tv: 0 };
 		u.name = q.name;
+		u.def = q.def ? 1 : 0;
+		if (q.dev)
+			u.dev = q.dev;
 		for (let c in [ 'w', 'v' ]) {
 			let b = ctr['c' + c + q.idx];
 			if (b != null && b > u[c])
 				u[c] = b;
 			let qq = qta['q' + c + q.idx];
-			if (qq)
+			if (qq) {
 				u['t' + c] = (qq.used >= qq.over) ? 1 : 0;
+				u['l' + c] = qq.over;
+			}
 		}
 	}
+}
+
+// ------------------------------------------------------- clients and exempted addresses
+
+function text_from(envfile, cmd) {
+	let f = getenv(envfile);
+	if (f)
+		return readfile(f) || '';
+	let p = popen(cmd + ' 2>/dev/null', 'r');
+	if (!p)
+		return '';
+	let t = p.read('all') || '';
+	p.close();
+	return t;
+}
+
+// -> { nets: [ { dev, net } ] (client-side networks), self: { ip: true } (the router's own addresses) }
+function lan_info(cfg) {
+	let wan = cfg.main.wan_if;
+	wan = (type(wan) == 'array') ? wan : [ wan || 'wan' ];
+	let r = { nets: [], self: {} };
+	for (let line in split(text_from('XGUARD_ADDRS', 'ip -4 -o addr show'), '\n')) {
+		let m = match(line, /^[0-9]+: +([^ @:]+)[^ ]* +inet ([0-9.]+)\/([0-9]+)/);
+		if (!m)
+			continue;
+		r.self[m[2]] = true;
+		if (m[1] != 'lo' && !(m[1] in wan))
+			push(r.nets, { dev: m[1], net: m[2] + '/' + m[3] });
+	}
+	return r;
+}
+
+// $RUN/acct/known: the clients of today ("ip dev mac"), the candidates for the default allowance. It only grows
+// during a day (so the ruleset does not change when a device sleeps) and is rebuilt at the daily reset.
+function update_known(st, cfg, fresh) {
+	let net = lan_info(cfg);
+	let known = {};
+	if (!fresh)
+		for (let c in known_clients())
+			known[c.ip] = { dev: c.dev, mac: c.mac };
+	let add = (ip, dev, mac, trusted) => {
+		if (!match(ip, /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) || net.self[ip])
+			return;
+		let on = null;
+		for (let n in net.nets)
+			if (in_net(ip, n.net))
+				on = n.dev;
+		if (!on && !trusted)
+			return;
+		if (!known[ip])
+			known[ip] = { dev: on || dev || '-', mac: '-' };
+		if (on)
+			known[ip].dev = on;
+		if (mac)
+			known[ip].mac = lc(mac);
+	};
+
+	for (let line in split(text_from('XGUARD_NEIGH', 'ip -4 neigh show'), '\n')) {
+		let m = match(line, /^([0-9.]+) dev ([^ ]+) lladdr ([0-9a-fA-F:]+)/);
+		if (m)
+			add(m[1], m[2], m[3]);
+	}
+	for (let line in split(readfile(getenv('XGUARD_LEASES') || '/tmp/dhcp.leases') || '', '\n')) {
+		let f = split(line, ' ');
+		if (length(f) >= 3)
+			add(f[2], null, f[1]);
+	}
+	for (let ip in keys(st.clients))
+		add(ip);
+	// users already counted today stay, even when the interfaces are not up yet (boot)
+	for (let k in keys(st.users))
+		if (substr(k, 0, 3) == 'ip:' && st.users[k].def)
+			add(substr(k, 3), st.users[k].dev, null, true);
+
+	let out = '';
+	for (let ip in sort(keys(known), (a, b) => ip_num(a) - ip_num(b)))
+		out += ip + ' ' + known[ip].dev + ' ' + known[ip].mac + '\n';
+	ensure_dirs();
+	if (out != (readfile(AD + '/known') || ''))
+		writefile(AD + '/known', out);
+}
+
+// current members of bypass_dyn, to carry them over a ruleset reload
+function bypass_addresses() {
+	let t = nft_text('list set inet ' + TBL + ' bypass_dyn') || '';
+	let i = index(t, 'elements = {');
+	let r = [];
+	if (i >= 0)
+		for (let m in match(substr(t, i), /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/g))
+			push(r, m[0]);
+	return r;
+}
+
+// everything a (re)loaded ruleset must start from
+function make_seeds(cfg, st) {
+	update_known(st, cfg, false);
+	return { users: st.users, clients: st.clients, dyn: bypass_addresses() };
 }
 
 function write_map(qs) {
 	ensure_dirs();
 	let m = [];
 	for (let q in qs)
-		push(m, { idx: q.idx, key: q.key, name: q.name });
+		push(m, { idx: q.idx, key: q.key, name: q.name, def: q.def, dev: q.dev });
 	writefile(AD + '/map.json', sprintf('%J', m));
 }
 
@@ -462,12 +589,12 @@ function seeds() {
 	let cfg = load_config();
 	let p = day_params(cfg.main);
 	let st = load_state(now(), p);
-	return { users: st.users };
+	return make_seeds(cfg, st);
 }
 
 // load (generate + nft -f) the ruleset with the current usage seeded into the counters/quotas
 function reload_rules(cfg, st) {
-	let txt = gen_nft(cfg, { users: st.users });
+	let txt = gen_nft(cfg, make_seeds(cfg, st));
 	if (!txt)
 		return false;
 	ensure_dirs();
@@ -496,9 +623,10 @@ function harvest(force) {
 
 	let live = cfg.main.enabled && (mget(cfg.main, 'accounting', '1') == '1');
 	if (live) {
-		read_dns(st);
-		collect_sets(st);
+		read_dns(st, cfg);
+		collect_sets(st, lan_info(cfg).self);
 		collect_users(st, cfg);
+		update_known(st, cfg, false);
 	}
 
 	let today = day_of(ts, p);
@@ -507,9 +635,12 @@ function harvest(force) {
 		save_flash(st, keep);			// close the finished day
 		let users = {};
 		for (let k in keys(st.users))
-			users[k] = { name: st.users[k].name, w: 0, v: 0, tw: 0, tv: 0 };
+			if (!st.users[k].def)		// default users are found again as they show up
+				users[k] = { name: st.users[k].name, w: 0, v: 0, tw: 0, tv: 0 };
 		st = new_state(ts, p);
 		st.users = users;
+		if (live)
+			update_known(st, cfg, true);
 		if (live)
 			reload_rules(cfg, st);		// counters and quotas start from zero
 		save_flash(st, keep);
@@ -577,11 +708,15 @@ function report(day) {
 	for (let q in quota_targets(cfg))
 		lim[q.key] = q;
 	let users = [];
+	let today = (st.day == day_of(ts, p));
 	for (let k in keys(st.users)) {
 		let u = st.users[k];
+		if (today && !lim[k])
+			continue;
 		let l = lim[k] || {};
 		push(users, {
-			key: k, name: u.name || k, w: u.w, v: u.v, tw: u.tw ? true : false, tv: u.tv ? true : false,
+			key: k, name: u.name || k, def: (l.def || u.def) ? true : false,
+			w: u.w, v: u.v, tw: u.tw ? true : false, tv: u.tv ? true : false,
 			w_mb: l.w_mb || 0, w_kbps: (l.w_kbps == null ? 0 : l.w_kbps), v_mb: l.v_mb || 0, v_kbps: (l.v_kbps == null ? 0 : l.v_kbps)
 		});
 	}
@@ -614,4 +749,4 @@ function report(day) {
 
 export { RUN, ETC, now, day_params, day_of, next_reset, parse_pairs, parse_clients, parse_counters, parse_quotas,
 	site_of_name, ip_site, load_state, save_ram, save_flash, list_days, harvest, reset_user, clear_stats, report,
-	seeds, write_map, reload_rules, read_dns, collect_sets, read_gz };
+	seeds, write_map, reload_rules, read_dns, collect_sets, read_gz, update_known, bypass_match, lan_info };

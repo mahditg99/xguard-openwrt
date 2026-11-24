@@ -317,16 +317,46 @@ function set_decl(name, typ, items, flags) {
 	return s + '\t}\n';
 }
 
+// clients seen today, written by the accounting harvester (acctlib.uc): "ip dev mac" per line, "-" = unknown.
+// Needed because dhcp.leases is empty after a reboot until every client renews, and static clients never appear there.
+function known_clients() {
+	let r = [];
+	for (let line in split(readfile((getenv('XGUARD_RUN') || RUN) + '/acct/known') || '', '\n')) {
+		let f = split(line, ' ');
+		if (length(f) >= 3 && match(f[0], RE_IP))
+			push(r, { ip: f[0], dev: f[1], mac: lc(f[2]) });
+	}
+	return r;
+}
+
 function lease_ips(mac) {
 	let ips = [];
-	let txt = readfile('/tmp/dhcp.leases');
+	let txt = readfile(getenv('XGUARD_LEASES') || '/tmp/dhcp.leases');
 	mac = lc(mac);
 	for (let line in split(txt || '', '\n')) {
 		let f = split(line, ' ');
 		if (length(f) >= 3 && lc(f[1]) == mac && match(f[2], RE_IP))
 			push(ips, f[2]);
 	}
+	for (let c in known_clients())
+		if (c.mac == mac && !(c.ip in ips))
+			push(ips, c.ip);
 	return ips;
+}
+
+function ip_num(ip) {
+	let o = split(ip, '.');
+	return int(o[0]) * 16777216 + int(o[1]) * 65536 + int(o[2]) * 256 + int(o[3]);
+}
+
+// is ip inside "a.b.c.d" or "a.b.c.d/n" ?
+function in_net(ip, net) {
+	let p = split(net, '/');
+	let bits = (p[1] == null) ? 32 : int(p[1]);
+	let size = 1;
+	for (let i = bits; i < 32; i++)
+		size *= 2;
+	return int(ip_num(ip) / size) == int(ip_num(p[0]) / size);
 }
 
 // ---------------------------------------------------------- accounting + daily quotas
@@ -351,9 +381,58 @@ function kbytes_rate(kbps) {
 	return (kbps > 0 && k < 1) ? 1 : k;
 }
 
-// -> [ { idx, key, name, ips, w_mb, w_kbps, v_mb, v_kbps } ]   (idx = 1.. is part of the nft object names)
+// The default allowance (main.def_*) goes to every client that has no `config quota` of its own and is not an
+// exception from the default policy:  default_mode direct -> exceptions are the VPN devices/interfaces (the default
+// then has only the whitelist allowance);  default_mode vpn -> exceptions are the direct ones (both allowances).
+function default_targets(cfg, covered) {
+	let m = cfg.main;
+	let vpn_mode = (mget(m, 'default_mode', 'direct') == 'vpn');
+	let d = {
+		w_mb: mint(m, 'def_wl_mb', 0), w_kbps: mint(m, 'def_wl_kbps', 64),
+		v_mb: vpn_mode ? mint(m, 'def_vpn_mb', 0) : 0, v_kbps: mint(m, 'def_vpn_kbps', 64)
+	};
+	if (d.w_mb <= 0 && d.v_mb <= 0)
+		return [];
+
+	let exc_nets = [], exc_macs = [], exc_ifs = [];
+	for (let dv in cfg.devices) {
+		if (vpn_mode ? (dv.mode != 'direct') : (dv.mode == 'direct'))
+			continue;
+		if (dv.mac && match(dv.mac, RE_MAC)) {
+			push(exc_macs, lc(dv.mac));
+			for (let ip in lease_ips(dv.mac))
+				push(exc_nets, ip);
+		} else if (dv.ip && match(dv.ip, RE_IP))
+			push(exc_nets, dv.ip);
+	}
+	for (let i in cfg.ifaces)
+		if (i.mode == 'block' || i.mode == (vpn_mode ? 'direct' : 'vpn'))
+			push(exc_ifs, i.name);
+
+	let found = {};
+	for (let c in known_clients())
+		found[c.ip] = c;
+	for (let ip in keys(found)) {
+		let c = found[ip];
+		let skip = (c.mac in exc_macs) || (c.dev in exc_ifs);
+		for (let n in [ ...covered, ...exc_nets ])
+			if (in_net(ip, n))
+				skip = true;
+		if (skip)
+			delete found[ip];
+	}
+	// numeric order: the generated ruleset must not depend on the order the clients were discovered in
+	let r = [];
+	for (let ip in sort(keys(found), (a, b) => ip_num(a) - ip_num(b)))
+		push(r, { key: 'ip:' + ip, name: ip, ips: [ ip ], dev: found[ip].dev, def: true,
+			w_mb: d.w_mb, w_kbps: d.w_kbps, v_mb: d.v_mb, v_kbps: d.v_kbps });
+	return r;
+}
+
+// -> [ { idx, key, name, ips, w_mb, w_kbps, v_mb, v_kbps[, def] } ]   (idx = 1.. is part of the nft object names)
 function quota_targets(cfg) {
 	let r = [];
+	let covered = [];
 	for (let s in cfg.quotas) {
 		let key, ips;
 		if (s.ip && match(s.ip, RE_IP)) {
@@ -364,11 +443,17 @@ function quota_targets(cfg) {
 			ips = lease_ips(s.mac);
 		} else
 			continue;
+		for (let ip in ips)
+			push(covered, ip);
 		push(r, {
 			idx: length(r) + 1, key: key, name: s.name || key, ips: ips,
 			w_mb: mint(s, 'wl_mb', 0), w_kbps: mint(s, 'wl_kbps', 64),
 			v_mb: mint(s, 'vpn_mb', 0), v_kbps: mint(s, 'vpn_kbps', 64)
 		});
+	}
+	for (let t in default_targets(cfg, covered)) {
+		t.idx = length(r) + 1;
+		push(r, t);
 	}
 	return r;
 }
@@ -381,9 +466,11 @@ function acct_parts(cfg, seeds) {
 		+ aset('cli_w', 'ipv4_addr', 1024, '1d') + aset('cli_v', 'ipv4_addr', 1024, '1d');
 	let objs = '', wf = '', vi = '', vo = '';
 	let users = (seeds && type(seeds.users) == 'object') ? seeds.users : {};
+	let clients = (seeds && type(seeds.clients) == 'object') ? seeds.clients : {};
 
 	for (let q in qs) {
-		let sd = users[q.key] || {};
+		// a client that has just come under the default allowance starts with what it already used today
+		let sd = users[q.key] || (q.def ? clients[q.ips[0]] : null) || {};
 		for (let c in [ 'w', 'v' ]) {
 			let mb = q[c + '_mb'];
 			let ks = kbytes_rate(q[c + '_kbps']);
@@ -391,8 +478,9 @@ function acct_parts(cfg, seeds) {
 			objs += sprintf('\tcounter c%s%d { packets 0 bytes %d }\n', c, q.idx, used);
 			if (mb > 0) {
 				let qb = mb * 1048576;
+				// "throttled" is only remembered for the allowance it was reached with: raising the limit frees the user
 				objs += sprintf('\tquota q%s%d { over %d bytes used %d bytes }\n', c, q.idx, qb,
-					sd['t' + c] ? qb : (used < qb ? used : qb));
+					(sd['t' + c] && sd['l' + c] == qb) ? qb : (used < qb ? used : qb));
 				if (ks > 0)
 					for (let d in [ 'u', 'd' ])
 						objs += sprintf('\tlimit t%s%s%d { rate over %d kbytes/second burst %d kbytes }\n',
@@ -487,8 +575,14 @@ function gen_nft(cfg, seeds) {
 	o += set_decl('vpn_macs', 'ether_addr', vpn_mac);
 	o += set_decl('bypass4', 'ipv4_addr', bypass, 'interval\n\t\tauto-merge');
 	o += set_decl('bypass_user', 'ipv4_addr', user_bypass, 'interval\n\t\tauto-merge');
-	// filled by dnsmasq (nftset=) with the addresses of exempted domains; entries expire by themselves
-	o += '\tset bypass_dyn {\n\t\ttype ipv4_addr\n\t\tflags timeout\n\t\ttimeout 1h\n\t\tsize 4096\n\t}\n';
+	// Addresses of exempted domains. Filled by dnsmasq (config ipset -> nftset=) when it gets an answer from upstream,
+	// and by the harvester from the query log (dnsmasq does not re-add cached answers). Kept alive while in use
+	// (chain dyn_keep) and carried over a ruleset reload (seeds.dyn) - otherwise cached names would go via the tunnel.
+	let dyn = (seeds && type(seeds.dyn) == 'array') ? filter(seeds.dyn, (x) => match(x, RE_IP)) : [];
+	o += '\tset bypass_dyn {\n\t\ttype ipv4_addr\n\t\tflags dynamic,timeout\n\t\ttimeout 12h\n\t\tsize 8192\n'
+		+ (length(dyn) ? '\t\telements = { ' + join(', ', dyn) + ' }\n' : '') + '\t}\n';
+	o += '\tchain dyn_keep {\n\t\ttype filter hook prerouting priority -170; policy accept;\n'
+		+ '\t\tip daddr @bypass_dyn update @bypass_dyn { ip daddr timeout 12h }\n\t}\n';
 
 	// per-user speed limits (policers: drop what exceeds the rate)
 	let up_rules = '', down_rules = '', objs = '';
@@ -637,4 +731,4 @@ function parse_vars(txt) {
 	return r;
 }
 
-export { local_dns, classify_bypass, bypass_split, load_config, ordered_nodes, node_by_id, node_chain, gen_xray, gen_nft, gen_lockdown, parse_vars, quota_targets, num };
+export { local_dns, classify_bypass, bypass_split, load_config, ordered_nodes, node_by_id, node_chain, gen_xray, gen_nft, gen_lockdown, parse_vars, quota_targets, num, known_clients, in_net, ip_num };

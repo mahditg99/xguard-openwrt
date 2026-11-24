@@ -23,6 +23,15 @@ mkdir -p $RUN $ETC $SIM/conf $SIM/bin $D
 
 export XGUARD_RUN=$RUN XGUARD_ETC=$ETC XGUARD_CONFDIR=$SIM/conf XGUARD_NFT=$SIM/bin/nft XGUARD_DNSLOG=$RUN/dns.log
 A="ucode $SIM/lib/acct.uc"
+export XGUARD_ADDRS=$SIM/addrs XGUARD_NEIGH=$SIM/neigh XGUARD_LEASES=$SIM/leases
+cat > $SIM/addrs <<'EOF'
+1: lo    inet 127.0.0.1/8 scope host lo
+2: wan    inet 192.168.1.69/24 brd 192.168.1.255 scope global wan
+5: phy0-ap0    inet 192.168.5.1/24 brd 192.168.5.255 scope global phy0-ap0
+6: phy1-ap0    inet 192.168.4.1/24 scope global phy1-ap0
+EOF
+: > $SIM/neigh
+: > $SIM/leases
 
 cat > $SIM/conf/xguard <<'EOF'
 config main 'main'
@@ -50,6 +59,8 @@ case "$*" in
 	"list counters table inet xguard") cat $D/counters;;
 	"list quotas table inet xguard") cat $D/quotas;;
 	-f*) echo "$*" >> /tmp/xgacct/nft.calls; cp "$2" /tmp/xgacct/last-load.nft;;
+	"list set inet xguard bypass_dyn") cat $D/bypass_dyn 2>/dev/null;;
+	"add element"*) echo "$*" >> /tmp/xgacct/nft.calls;;
 	*) exit 1;;
 esac
 EOF
@@ -192,6 +203,11 @@ echo "$seed" | grep -q 'quota qv1 { over 104857600 bytes used 104857600 bytes }'
 tpl=$(ucode $SIM/lib/gen.uc nft)
 echo "$tpl" | grep -q 'counter cw1 { packets 0 bytes 0 }' && ok "template (change detection) has no usage in it" || bad "template has zeros"
 
+# raising the allowance frees a throttled user (the flag only holds for the limit it was reached with)
+sed -i "s/option vpn_mb '100'/option vpn_mb '200'/" $SIM/conf/xguard
+ucode $SIM/lib/gen.uc nft seed | grep -q 'quota qv1 { over 209715200 bytes used 9100 bytes }' && ok "raised allowance is not seeded as used up" || bad "raised allowance"
+sed -i "s/option vpn_mb '200'/option vpn_mb '100'/" $SIM/conf/xguard
+
 # ---- 7. clock behind the last save must NOT start a new day --------------------------------------
 XGUARD_NOW=$((t0-86400*3)) $A harvest 2>/dev/null
 eq "old clock: still the same day" "20261124" "$(q day)"
@@ -232,6 +248,80 @@ printf "config main main
 rm -f $RUN/acct/map.json
 XGUARD_NOW=$((t0+86400*3+60)) $A harvest 2>/dev/null
 eq "removed quota user is gone" "" "$(q users/ip:192.168.5.60/w)"
+
+# ---- 12. exempted domains: bypass_dyn from the query log and across reloads ------------------------------
+rm -rf $RUN $ETC $SIM/nft.calls; mkdir -p $RUN $ETC
+for x in w v; do setfile cli_$x cli_$x ipv4_addr ""; setfile pair_$x pair_$x "ipv4_addr . ipv4_addr" ""; done
+printf "config main main\n\toption enabled 1\n\tlist wan_if wan\nconfig bypass\n\tlist cidr Aparat.com\n\tlist cidr '*.ir'\n\tlist cidr 10.0.0.0/8\n" > $SIM/conf/xguard
+cat > $RUN/dns.log <<'EOF'
+Nov 24 10:00:00 dnsmasq[1]: 1 192.168.4.101/5 query[A] www.aparat.com from 192.168.4.101
+Nov 24 10:00:00 dnsmasq[1]: 1 192.168.4.101/5 cached www.aparat.com is 185.147.179.11
+Nov 24 10:00:01 dnsmasq[1]: 2 192.168.4.101/6 query[A] a.b.test.ir from 192.168.4.101
+Nov 24 10:00:01 dnsmasq[1]: 2 192.168.4.101/6 reply a.b.test.ir is 2.2.2.2
+Nov 24 10:00:02 dnsmasq[1]: 3 192.168.4.101/7 query[A] notaparat.com from 192.168.4.101
+Nov 24 10:00:02 dnsmasq[1]: 3 192.168.4.101/7 reply notaparat.com is 3.3.3.3
+EOF
+XGUARD_NOW=$t0 $A harvest 2>$SIM/err3
+[ -s $SIM/err3 ] && cat $SIM/err3
+added=$(grep "add element inet xguard bypass_dyn" $SIM/nft.calls 2>/dev/null)
+case "$added" in *185.147.179.11*) ok "cached answer of an exempted domain is added";; *) bad "cached aparat address added ($added)";; esac
+case "$added" in *2.2.2.2*) ok "suffix rule (*.ir) matches";; *) bad "*.ir match";; esac
+case "$added" in *3.3.3.3*) bad "notaparat.com must not match";; *) ok "similar name is not matched";; esac
+setfile bypass_dyn bypass_dyn ipv4_addr "185.147.179.11 expires 11h, 2.2.2.2 timeout 12h expires 5h"
+ucode $SIM/lib/gen.uc nft seed | grep -q 'elements = { 185.147.179.11, 2.2.2.2 }' && ok "exempted addresses survive a reload" || bad "bypass_dyn seeding"
+ucode $SIM/lib/gen.uc nft | grep -q 'elements = { 185.147' && bad "template must not contain addresses" || ok "template has no addresses"
+
+# ---- 13. default allowance and its exceptions -----------------------------------------------------------
+rm -rf $RUN $ETC; mkdir -p $RUN $ETC; rm -f $D/bypass_dyn
+cat > $SIM/neigh <<'EOF'
+192.168.5.104 dev phy0-ap0 lladdr 7a:61:4a:86:97:51 STALE
+192.168.5.50 dev phy0-ap0 lladdr aa:bb:cc:00:00:50 REACHABLE
+192.168.4.101 dev phy1-ap0 lladdr aa:bb:cc:00:00:01 REACHABLE
+192.168.5.77 dev phy0-ap0 lladdr aa:bb:cc:00:00:99 REACHABLE
+192.168.1.1 dev wan lladdr 30:a2:20:cf:a4:8c REACHABLE
+192.168.5.200 dev phy0-ap0  FAILED
+EOF
+cat > $SIM/conf/xguard <<'EOF'
+config main 'main'
+	option enabled '1'
+	option def_wl_mb '100'
+	option def_wl_kbps '32'
+	option def_vpn_mb '50'
+	list wan_if 'wan'
+config device
+	option ip '192.168.4.101'
+	option mode 'vpn'
+config device
+	option mac 'aa:bb:cc:00:00:99'
+	option mode 'vpn'
+config quota
+	option name 'own'
+	option ip '192.168.5.50'
+	option wl_mb '10'
+EOF
+mkstate 0 0 "0 bytes" "0 bytes"
+setfile cli_w cli_w ipv4_addr "192.168.5.104 counter packets 5 bytes 5000 expires 1h, 192.168.1.69 counter packets 5 bytes 700 expires 1h"
+XGUARD_NOW=$t0 $A harvest 2>$SIM/err4
+[ -s $SIM/err4 ] && cat $SIM/err4
+eq "known clients: LAN only, no FAILED, no WAN side" "192.168.4.101 192.168.5.50 192.168.5.77 192.168.5.104" "$(awk '{print $1}' $RUN/acct/known | tr '\n' ' ' | sed 's/ $//')"
+eq "the router's own address is not a client" "" "$(q clients/192.168.1.69/w)"
+N=$(ucode $SIM/lib/gen.uc nft seed)
+echo "$N" | grep -q 'ip saddr 192.168.5.104 quota name "qw2"' && ok "default allowance for an ordinary client" || bad "default rule"
+echo "$N" | grep -q 'quota qw2 { over 104857600 bytes used 5000 bytes }' && ok "starts with what the client already used" || bad "default seed"
+echo "$N" | grep -q 'saddr 192.168.4.101 quota' && bad "exception (ip) must have no default" || ok "exception by IP has no default"
+echo "$N" | grep -q 'saddr 192.168.5.77 quota' && bad "exception (mac) must have no default" || ok "exception by MAC has no default"
+echo "$N" | grep -q 'quota qv2' && bad "direct mode: no vpn default" || ok "direct mode: whitelist allowance only"
+eq "own quota wins over the default" "1" "$(echo "$N" | grep -c 'saddr 192.168.5.50 quota')"
+# default_mode vpn: exceptions are the direct devices, both allowances apply
+sed -i "s/option def_wl_mb '100'/option def_wl_mb '100'\n\toption default_mode 'vpn'/; s/option mode 'vpn'/option mode 'direct'/" $SIM/conf/xguard
+sed -i "0,/aa:bb:cc:00:00:99/s//aa:bb:cc:00:00:99/" $SIM/conf/xguard
+V=$(ucode $SIM/lib/gen.uc nft)
+echo "$V" | grep -q 'ip saddr 192.168.5.104 quota name "qv' && ok "vpn mode: vpn default too" || bad "vpn default"
+echo "$V" | grep -q 'saddr 192.168.4.101 quota' && bad "vpn mode: direct device excepted" || ok "vpn mode: direct device has no default"
+printf "config main main\n\toption enabled 1\n\tlist wan_if wan\n" > $SIM/conf/xguard
+XGUARD_NOW=$((t0+30)) $A harvest 2>/dev/null
+rm -f $RUN/acct/map.json; XGUARD_NOW=$((t0+60)) $A harvest 2>/dev/null
+eq "default switched off: its users are gone" "" "$(q users/ip:192.168.5.104/w)"
 
 echo
 echo "passed=$pass failed=$fail"

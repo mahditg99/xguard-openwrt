@@ -1,5 +1,21 @@
 # Changelog / تاریخچهٔ تغییرات
 
+## 1.2.0 — default allowance, exempted domains actually exempted / سقف پیش‌فرض و رفع استثنای دامنه‌ای
+
+**EN**
+- Fix (important, present since 0.1.0): addresses of exempted **domains** never reached the nft set `bypass_dyn`: xguard wrote an option OpenWrt's dnsmasq ignores. Those sites therefore still went through xray, were counted as **VPN**, were slowed when the VPN allowance ran out, and stopped working when the tunnel was down. It now uses a `config ipset` section (`dhcp.xguard_bypass`).
+- Also: cached DNS answers of exempted domains are added from the query log, addresses stay while in use and survive ruleset reloads; removing a domain flushes the set.
+- Fix: raising the allowance of a throttled user did not free them.
+- New **default allowance** (`def_wl_mb`, `def_wl_kbps`, `def_vpn_mb`, `def_vpn_kbps`): per-device daily quota for everybody without an own quota who is not excepted from `default_mode`. In `direct` mode it is the whitelist allowance only; in `vpn` mode both.
+- Fix: with an empty `dhcp.leases` (after a reboot) MAC-based quotas found no address; the ARP table is used as well.
+
+**FA**
+- رفع باگ (مهم، از 0.1.0): آدرس **دامنه‌های** استثنا هرگز به مجموعهٔ `bypass_dyn` نمی‌رسید چون xguard گزینه‌ای می‌نوشت که dnsmasq در OpenWrt نادیده می‌گیرد. پس آن سایت‌ها همچنان از xray رد می‌شدند، **VPN** شمرده می‌شدند، با تمام شدن سقف VPN کند می‌شدند و با قطع تونل از کار می‌افتادند. حالا از بخش `config ipset` (`dhcp.xguard_bypass`) استفاده می‌شود.
+- همچنین پاسخ‌های کش‌شدهٔ DNS دامنه‌های استثنا از لاگ پرسمان اضافه می‌شوند، آدرس‌ها تا وقتی استفاده می‌شوند می‌مانند و با بارگذاری مجدد قواعد پاک نمی‌شوند؛ حذف دامنه مجموعه را خالی می‌کند.
+- رفع باگ: بالا بردن سقف کاربرِ محدودشده او را آزاد نمی‌کرد.
+- **سقف پیش‌فرض** جدید (`def_wl_mb`، `def_wl_kbps`، `def_vpn_mb`، `def_vpn_kbps`): سهمیهٔ روزانهٔ هر دستگاه برای همهٔ کسانی که سهمیهٔ جدا ندارند و از `default_mode` استثنا نشده‌اند. در حالت `direct` فقط سقف لیست سفید، در حالت `vpn` هر دو.
+- رفع باگ: با خالی بودن `dhcp.leases` (بعد از ریستارت) سهمیه‌های مبتنی بر MAC آدرسی پیدا نمی‌کردند؛ حالا جدول ARP هم استفاده می‌شود.
+
 ## 1.1.1 — shutdown flush fix / رفع ذخیره‌نشدن آمار هنگام ریستارت
 
 **EN**

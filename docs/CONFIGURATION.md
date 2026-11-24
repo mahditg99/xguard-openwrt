@@ -136,7 +136,18 @@ xguard counts the traffic of **every client IP** in two classes and can give sel
 | **whitelist** (`wl`) | Everything that does **not** enter the tunnel: destinations you exempted by IP/CIDR or by domain (the exempted domains' addresses are put into `bypass_dyn`), and clients/interfaces set to `direct`. | forward hook, between a LAN client and `wan_if` |
 | **vpn** (`vpn`) | Connections xguard redirected to xray (they are tagged `ct mark 0x58……`). | input (client → xray) and output (xray → client) |
 
-A domain that is exempted **only** by an xray rule (`keyword:…`, or a name that was never resolved through the router's dnsmasq) still enters xray and is counted as `vpn`.
+An exempted domain counts as `wl` only if its address is known to the router: the client must resolve it through the router's DNS. With DoH/DoT, or for a `keyword:` entry until the next harvest (up to 30 s), the connection still enters xray (which sends it directly) and is counted as `vpn`.
+
+### Default allowance
+
+`config main` options `def_wl_mb`, `def_wl_kbps`, `def_vpn_mb`, `def_vpn_kbps` (same meaning as in `config quota`) apply to **every client without its own quota** that is not excepted from `default_mode`, each client counted separately:
+
+| `default_mode` | excepted (no default) | allowances used |
+|---|---|---|
+| `direct` | devices / interfaces set to `vpn` | `def_wl_*` only |
+| `vpn` | devices / interfaces set to `direct` | `def_wl_*` and `def_vpn_*` |
+
+Clients are found from the ARP table, DHCP leases and today's traffic; a new one is covered within about 30 s (what it used until then counts). `0` or empty volume = no default.
 
 ```
 config quota

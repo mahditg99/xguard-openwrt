@@ -18,7 +18,8 @@ function cur() {
 const MAIN_KEYS = [
 	'enabled', 'node', 'log_level', 'dns_remote', 'probe_url', 'probe_interval', 'fail_threshold',
 	'mem_limit', 'rss_kill', 'sniffing', 'block_quic', 'dns_bypass', 'default_mode',
-	'accounting', 'reset_time', 'tz_offset', 'acct_days'
+	'accounting', 'reset_time', 'tz_offset', 'acct_days',
+	'def_wl_mb', 'def_wl_kbps', 'def_vpn_mb', 'def_vpn_kbps'
 ];
 const QUOTA_KEYS = [ 'name', 'ip', 'mac', 'wl_mb', 'wl_kbps', 'vpn_mb', 'vpn_kbps' ];
 const MAIN_LISTS = [ 'source', 'wan_if' ];
@@ -173,6 +174,9 @@ function save_config(req) {
 				if (q[k] != null && q[k] !== '' && !match('' + q[k], /^[0-9]{1,9}$/))
 					die('quota "' + (q.name || '?') + '": ' + k + ' must be a whole number (0 = unlimited / cut off)');
 		}
+		for (let k in [ 'def_wl_mb', 'def_wl_kbps', 'def_vpn_mb', 'def_vpn_kbps' ])
+			if (d.main && d.main[k] != null && d.main[k] !== '' && !match('' + d.main[k], /^[0-9]{1,9}$/))
+				die(k + ' must be a whole number');
 		if (d.main && d.main.reset_time != null && d.main.reset_time !== '' && !match('' + d.main.reset_time, /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/))
 			die('reset_time must look like 00:00');
 		if (d.main && d.main.tz_offset != null && d.main.tz_offset !== '' && !match('' + d.main.tz_offset, /^-?[0-9]{1,3}$/))

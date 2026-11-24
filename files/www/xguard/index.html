@@ -627,8 +627,9 @@ function drawUsage() {
     const l = leaseOf(r.ip), open = uOpen.has(r.ip);
     const wcell = r.u ? quotaCell(r.u, 'w') : h('span', { class: 'mono' }, fmt(r.c.w));
     const vcell = r.u ? quotaCell(r.u, 'v') : h('span', { class: 'mono' }, fmt(r.c.v));
+    const label = (r.u && !r.u.def && r.u.name) || (l && l.name && l.name !== '*' ? l.name : r.ip);
     tb.append(h('tr', { style: 'cursor:pointer', onclick: () => { open ? uOpen.delete(r.ip) : uOpen.add(r.ip); drawUsage(); } },
-      h('td', {}, h('div', {}, (open ? '▾ ' : '▸ ') + ((r.u && r.u.name) || (l && l.name && l.name !== '*' ? l.name : r.ip))), h('div', { class: 'hint mono' }, r.ip)),
+      h('td', {}, h('div', {}, (open ? '▾ ' : '▸ ') + label), h('div', { class: 'hint mono' }, r.ip), r.u && r.u.def ? h('div', { class: 'hint' }, 'سقف پیش‌فرض') : null),
       h('td', {}, wcell), h('td', {}, vcell), h('td', { class: 'mono' }, fmt(r.c.w + r.c.v)),
       h('td', {}, r.u && live ? h('button', { class: 'b sec', onclick: async ev => { ev.stopPropagation(); if (confirm('مصرف امروز این کاربر صفر شود؟')) { await xg('usage_reset', { key: r.u.key }); say('ریست شد'); loadUsage(); } } }, 'ریست') : null)));
     if (open) tb.append(h('tr', {}, h('td', { colspan: 5, style: 'background:var(--bg)' }, Object.keys(r.c.s || {}).length ? siteTable(r.ip, r.c) : h('span', { class: 'hint' }, 'ریز مصرف سایت‌ها برای این روز موجود نیست.'))));
@@ -656,12 +657,30 @@ function quotaCard() {
     h('td', {}, inp(q, 'vpn_mb', '7rem')), h('td', {}, inp(q, 'vpn_kbps', '6rem', '64')),
     h('td', {}, h('button', { class: 'b del', onclick: () => { cfg.quotas.splice(i, 1); render(); } }, 'حذف')))));
   const fld = (label, key, def, extra) => h('div', {}, h('label', { class: 'f' }, label), h('input', Object.assign({ class: 'ltr', style: 'width:100%', value: M[key] || def, onchange: e => { M[key] = e.target.value; } }, extra || {})));
-  return h('div', { class: 'card' }, h('b', {}, 'سهمیهٔ روزانه برای هر کاربر (دو سقف جدا: لیست سفید و VPN)'),
+  return h('div', {}, defaultCard(), h('div', { class: 'card' }, h('b', {}, 'سهمیهٔ روزانه برای هر کاربر (دو سقف جدا: لیست سفید و VPN)'),
     h('p', { class: 'hint' }, 'هر کاربر دو شمارندهٔ روزانهٔ جدا دارد: «لیست سفید» = ترافیک مستقیم که وارد تونل نمی‌شود (مقصدهای لیست استثنا، دستگاه/اینترفیس مستقیم) و «VPN» = ترافیکی که از تونل می‌گذرد. وقتی مصرف یک شمارنده به سقفش برسد، فقط سرعت همان بخش به عدد «پس از سقف» کاهش می‌یابد (۰ = قطع کامل). حجم ۰ یا خالی = بدون سقف (فقط شمارش). هر ۲۴ ساعت (طبق ساعت ریست زیر) صفر می‌شود. مصرف هر چند دقیقه روی حافظهٔ فلش ذخیره می‌شود و با ریستارت روتر پاک نمی‌شود (در قطع ناگهانی برق حداکثر چند دقیقهٔ آخر از دست می‌رود). ۱ گیگابایت = ۱۰۲۴ مگابایت.'),
     dl, cfg.quotas.length ? t : h('p', { class: 'hint' }, 'هنوز سهمیه‌ای تعریف نشده است.'),
     h('div', { class: 'row' }, h('button', { class: 'b sec', onclick: () => { cfg.quotas.push({ name: 'user' + (cfg.quotas.length + 1), ip: '', mac: '', wl_mb: '1024', wl_kbps: '128', vpn_mb: '512', vpn_kbps: '64' }); render(); } }, 'افزودن کاربر')),
     h('div', { class: 'grid' }, fld('ساعت ریست روزانه (HH:MM)', 'reset_time', '00:00', { placeholder: '00:00' }), fld('اختلاف ساعت محلی با UTC (دقیقه؛ تهران ۲۱۰)', 'tz_offset', '210'), fld('نگهداری گزارش (روز)', 'acct_days', '7')),
     h('div', { class: 'row' }, h('label', {}, h('input', { type: 'checkbox', checked: M.accounting !== '0', onchange: e => { M.accounting = e.target.checked ? '1' : '0'; } }), ' شمارش مصرف و گزارش (لاگ DNS در RAM نگه داشته می‌شود)')),
+    saveBar()));
+}
+
+// allowance for everybody without an own quota and not excepted from the default policy
+function defaultCard() {
+  const M = cfg.main, vpn = M.default_mode === 'vpn';
+  const fld = (label, key, ph) => h('div', {}, h('label', { class: 'f' }, label),
+    h('input', { class: 'ltr', type: 'number', min: 0, style: 'width:100%', placeholder: ph, value: M[key] || '', onchange: e => { M[key] = e.target.value.trim() || '0'; } }));
+  return h('div', { class: 'card' }, h('b', {}, 'سقف پیش‌فرض (برای همهٔ کاربرانی که استثنا نیستند)'),
+    h('p', { class: 'hint' }, vpn
+      ? 'سیاست پیش‌فرض «همه VPN» است: هر دستگاهی که سهمیهٔ جداگانه ندارد و «مستقیم» (استثنا) نشده، این دو سقف روزانه را می‌گیرد؛ هر دستگاه جدا شمرده می‌شود. دستگاه/اینترفیس مستثنا مشمول سقف پیش‌فرض نیست.'
+      : 'سیاست پیش‌فرض «همه مستقیم» است: هر دستگاهی که سهمیهٔ جداگانه ندارد و VPN (استثنا) نگرفته، این سقف روزانه را می‌گیرد؛ هر دستگاه جدا شمرده می‌شود. دستگاه‌هایی که VPN دارند مشمول سقف پیش‌فرض نیستند.'),
+    h('p', { class: 'hint' }, 'حجم خالی یا ۰ = بدون سقف پیش‌فرض. سرعت ۰ = قطع کامل پس از سقف. دستگاه تازه‌وارد حداکثر حدود ۳۰ ثانیه بعد مشمول می‌شود (مصرف همان چند ثانیه هم حساب می‌شود).'),
+    h('div', { class: 'grid' },
+      fld(vpn ? 'لیست سفید: حجم روزانه (MB)' : 'حجم روزانه (MB)', 'def_wl_mb', '0'),
+      fld(vpn ? 'لیست سفید: سرعت پس از سقف (kbit/s)' : 'سرعت پس از سقف (kbit/s)', 'def_wl_kbps', '64'),
+      vpn ? fld('VPN: حجم روزانه (MB)', 'def_vpn_mb', '0') : null,
+      vpn ? fld('VPN: سرعت پس از سقف (kbit/s)', 'def_vpn_kbps', '64') : null),
     saveBar());
 }
 

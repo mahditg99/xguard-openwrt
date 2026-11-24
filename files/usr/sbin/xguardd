@@ -93,8 +93,35 @@ teardown_routing() {
 # Exempted (bypass) domains are the exception: they use the plain resolver outside the tunnel
 # (server=/domain/ip), and - if dnsmasq was built with nftset (dnsmasq-full) - their addresses are put into
 # the nft set "bypass_dyn", which the kill-switch and the redirect skip, so they work even with xray down.
+
+# OpenWrt's dnsmasq only turns `config ipset` sections into nftset= lines (an option in the dnsmasq section is
+# silently ignored). $1 = space separated domains, empty = remove. Sets `changed` of dns_hook (dynamic scope).
+dns_nftset() {
+	local doms="$1" cur d
+	cur=
+	[ "$(uci -q get dhcp.xguard_bypass)" = ipset ] && cur=$(uci -q get dhcp.xguard_bypass.domain)
+	# versions up to 1.1.1 wrote this option, which never had any effect
+	if uci -q get dhcp.@dnsmasq[0].nftset | grep -q '#xguard#bypass_dyn'; then
+		uci -q delete dhcp.@dnsmasq[0].nftset
+		changed=1
+	fi
+	[ "$(echo $cur)" = "$(echo $doms)" ] && return 0
+	uci -q delete dhcp.xguard_bypass
+	if [ -n "$doms" ]; then
+		uci -q set dhcp.xguard_bypass=ipset
+		uci -q add_list dhcp.xguard_bypass.name=bypass_dyn
+		uci -q set dhcp.xguard_bypass.table=xguard
+		uci -q set dhcp.xguard_bypass.table_family=inet
+		uci -q set dhcp.xguard_bypass.family=4
+		for d in $doms; do uci -q add_list dhcp.xguard_bypass.domain="$d"; done
+	fi
+	# addresses of domains that were removed from the list must not stay exempted
+	nft flush set inet xguard bypass_dyn 2>/dev/null
+	changed=1
+}
+
 dns_hook() {
-	local port want cur changed=0 f dom dns doms="" want_srv want_set cur_set s
+	local port want cur changed=0 f dom dns doms="" want_srv want_set s
 	port=$(opt dns_port 15353)
 	want="127.0.0.1#$port"
 	if [ "$1" = on ]; then
@@ -102,28 +129,26 @@ dns_hook() {
 		dns=$(echo "$f" | sed -n 1p); doms=$(echo "$f" | sed 1d)
 		want_srv="$want"
 		want_set=
+		dnsmasq --version 2>/dev/null | grep -q ' nftset' && want_set="$doms"
 		for dom in $doms; do
 			[ -n "$dns" ] && want_srv="$want_srv /$dom/$dns"
-			dnsmasq --version 2>/dev/null | grep -q ' nftset' && want_set="$want_set /$dom/4#inet#xguard#bypass_dyn"
 		done
+		dns_nftset "$(echo $want_set)"
 		cur=$(uci -q get dhcp.@dnsmasq[0].server)
-		cur_set=$(uci -q get dhcp.@dnsmasq[0].nftset)
-		if [ "$cur" != "$want_srv" ] || [ "$(uci -q get dhcp.@dnsmasq[0].noresolv)" != 1 ] || [ "$(echo $cur_set)" != "$(echo $want_set)" ]; then
+		if [ "$cur" != "$want_srv" ] || [ "$(uci -q get dhcp.@dnsmasq[0].noresolv)" != 1 ]; then
 			if [ ! -f $DNSBAK ]; then
 				{ echo "noresolv=$(uci -q get dhcp.@dnsmasq[0].noresolv)"; echo "server=$cur"; } > $DNSBAK
 			fi
 			uci -q delete dhcp.@dnsmasq[0].server
 			for s in $want_srv; do uci -q add_list dhcp.@dnsmasq[0].server="$s"; done
-			uci -q delete dhcp.@dnsmasq[0].nftset
-			for s in $want_set; do uci -q add_list dhcp.@dnsmasq[0].nftset="$s"; done
 			uci -q set dhcp.@dnsmasq[0].noresolv=1
 			changed=1
 		fi
 	else
+		dns_nftset ""
 		if [ -f $DNSBAK ]; then
 			uci -q delete dhcp.@dnsmasq[0].server
 			for s in $(sed -n 's/^server=//p' $DNSBAK); do uci -q add_list dhcp.@dnsmasq[0].server="$s"; done
-			uci -q delete dhcp.@dnsmasq[0].nftset
 			v=$(sed -n 's/^noresolv=//p' $DNSBAK)
 			if [ -n "$v" ]; then uci -q set dhcp.@dnsmasq[0].noresolv="$v"; else uci -q delete dhcp.@dnsmasq[0].noresolv; fi
 			rm -f $DNSBAK
@@ -404,7 +429,7 @@ reconfigure() {
 }
 
 while :; do
-	nsig=$(cat $CONF /tmp/dhcp.leases 2>/dev/null | md5sum | cut -c1-32)
+	nsig=$(cat $CONF /tmp/dhcp.leases $RUN/acct/known 2>/dev/null | md5sum | cut -c1-32)
 	if [ "$nsig" != "$SIG" ]; then
 		SIG=$nsig
 		oldenabled=$ENABLED; oldcur=$CUR
